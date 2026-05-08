@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useOrder, useUpdateOrderStatus, useReviseOrder } from '@/hooks/useOrders';
 import { formatINR } from '@/lib/calculations';
 import StatusBadge from '@/components/StatusBadge';
 import OverdueBadge from '@/components/OverdueBadge';
+import ProformaInvoice from '@/components/ProformaInvoice';
 import { useCustomerOutstanding } from '@/hooks/useCustomers';
-import { Edit2, ArrowLeft, CheckCircle } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Printer } from 'lucide-react';
 
 const STATUS_FLOW = ['draft', 'sent', 'approved', 'dispatched', 'invoiced'];
 
@@ -25,6 +26,25 @@ export default function OrderDetail() {
   const [confirming, setConfirming] = useState(false);
 
   const buyerOutstanding = useCustomerOutstanding(order?.buyer_id);
+  const printRef = useRef<HTMLDivElement>(null);
+
+  const handlePrint = () => {
+    const content = printRef.current?.innerHTML;
+    if (!content) return;
+    const win = window.open('', '_blank', 'width=900,height=700');
+    if (!win) return;
+    win.document.write(`<!DOCTYPE html><html><head><title>PI ${o?.pi_number}</title>
+      <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background: #fff; }
+        @page { size: A4; margin: 10mm; }
+        @media print { body { -webkit-print-color-adjust: exact; } }
+      </style>
+    </head><body>${content}</body></html>`);
+    win.document.close();
+    win.focus();
+    setTimeout(() => { win.print(); }, 400);
+  };
 
   if (isLoading) return <div className="animate-pulse h-64 bg-gray-200 rounded-lg" />;
   if (!order) return <div className="text-center py-16 text-gray-400">Order not found</div>;
@@ -87,6 +107,12 @@ export default function OrderDetail() {
             )}
           </div>
           <div className="flex gap-2">
+            <button
+              onClick={handlePrint}
+              className="flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50"
+            >
+              <Printer className="w-4 h-4" /> Print Pro Forma
+            </button>
             {nextAction && o.status !== 'cancelled' && (
               <button
                 onClick={confirming ? handleStatusChange : () => setConfirming(true)}
@@ -255,6 +281,11 @@ export default function OrderDetail() {
             </div>
           )}
         </div>
+      </div>
+
+      {/* Hidden print content */}
+      <div ref={printRef} style={{ display: 'none' }}>
+        <ProformaInvoice order={o} />
       </div>
     </div>
   );

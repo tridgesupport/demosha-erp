@@ -1,0 +1,7 @@
+.vercel
+node_modules/
+dist/
+.env
+.env.*
+config.env.json
+.DS_Store

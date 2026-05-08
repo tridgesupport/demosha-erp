@@ -1,0 +1,9 @@
+{
+  "buildCommand": "cd apps/web && yarn build",
+  "outputDirectory": "apps/web/dist",
+  "installCommand": "yarn install",
+  "framework": null,
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/" }
+  ]
+}

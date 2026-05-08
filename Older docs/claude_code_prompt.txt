@@ -1,0 +1,638 @@
+You are building a full-stack web application for Company ABC — a chemical manufacturer. The app connects to an existing PostgreSQL database hosted on Neon and allows users to enter, view, and edit operational data including Proforma Invoices, customers, products, outstanding payments, and agents.
+
+---
+
+## TECH STACK
+
+Frontend: React 18 + TypeScript + Vite
+Routing: React Router v6
+Data fetching: TanStack Query v5 (useQuery, useMutation)
+Styling: Tailwind CSS v3
+Components: shadcn/ui
+Backend: Express.js + TypeScript (thin API layer over Neon)
+Database client: postgres (npm: 'postgres') or pg
+Deployment: Frontend → Vercel, Backend → Render (or a single Express server serving both)
+Environment: .env with DATABASE_URL pointing to Neon
+
+Do NOT use Prisma or any ORM. Write raw SQL queries using tagged template literals (postgres library) or pg.Pool.query(). The schema is already live — never run CREATE TABLE or DROP TABLE. Never ALTER TABLE to remove or rename existing columns.
+
+---
+
+## DATABASE CONNECTION
+
+Use the existing Neon PostgreSQL database. The schema has these tables (already populated with real data):
+- lookup_state_codes, lookup_financial_years, lookup_packaging_types (seed/lookup)
+- catalog_agents, catalog_products, catalog_product_variants (catalog)
+- customers (all trading parties — buyers and suppliers)
+- sales_orders, sales_order_lines, sales_pi_sequences (transactional)
+- finance_outstanding, finance_outstanding_alerts (finance)
+
+Two useful views already exist:
+- v_customer_outstanding — per-customer outstanding summary with total_pending, max_overdue_days, buckets at 30/60/90+ days
+- v_sales_orders_summary — orders with buyer name, consignee name, agent name, FY label, line count, total qty
+
+One useful DB function:
+- get_next_pi_number(fy_key SMALLINT) — call via SELECT get_next_pi_number($1) to auto-generate the next PI number for a given FY. This is atomic and thread-safe.
+
+---
+
+## DATABASE SCHEMA REFERENCE
+
+All tables use UUID primary keys, snake_case column names, and have tenant_id + organization_id + deleted_at columns. Here is the full schema:
+
+### lookup_state_codes
+state_code SMALLINT PK, state_name VARCHAR, region VARCHAR
+
+### lookup_financial_years
+fy_key SMALLINT PK (e.g. 26 = FY 2025-26), fy_label VARCHAR, start_date DATE, end_date DATE, is_current BOOLEAN
+
+### lookup_packaging_types
+pkg_id SERIAL PK, pkg_name VARCHAR
+
+### catalog_agents
+agent_id UUID PK, agent_name VARCHAR, contact_phone VARCHAR, contact_email VARCHAR, is_active BOOLEAN, tenant_id, organization_id, created_at, updated_at, deleted_at
+
+### catalog_products
+product_id UUID PK, product_name VARCHAR, hs_code VARCHAR, item_type VARCHAR (finished_goods/raw_material/packing_material/store_spares/wip/other), description TEXT, is_active BOOLEAN, tenant_id, organization_id, created_at, updated_at, deleted_at
+
+### catalog_product_variants
+variant_id UUID PK, product_id UUID FK, legacy_code_id SMALLINT UNIQUE, grade VARCHAR, qty_per_pkg SMALLINT (nullable), pkg_id INT FK (nullable), full_description VARCHAR, is_active BOOLEAN, tenant_id, organization_id, created_at, updated_at, deleted_at
+
+### customers
+customer_id UUID PK, party_name VARCHAR, gstin VARCHAR, primary_state_code SMALLINT FK, primary_address TEXT, contact_phone VARCHAR, contact_email VARCHAR, tally_ref VARCHAR, notes TEXT, is_active BOOLEAN, tenant_id, organization_id, created_at, updated_at, deleted_at
+
+### sales_orders
+order_id UUID PK, pi_number VARCHAR UNIQUE, fy_key SMALLINT FK, seq_number INT,
+order_date DATE (nullable), buyer_order_date DATE, buyer_po_number VARCHAR,
+buyer_id UUID FK -> customers, buyer_address TEXT, buyer_gstin VARCHAR, buyer_state_code SMALLINT FK,
+consignee_id UUID FK -> customers, consignee_address TEXT, consignee_gstin VARCHAR, consignee_state_code SMALLINT FK,
+agent_id UUID FK, payment_terms VARCHAR, freight_desc VARCHAR, freight_per_kg NUMERIC, insurance_pct NUMERIC, schedule_notes TEXT,
+gst_type VARCHAR (IGST or CGST_SGST), igst_rate NUMERIC, cgst_rate NUMERIC, tcs_rate NUMERIC,
+gross_value NUMERIC, insurance_amount NUMERIC, assessable_value NUMERIC, igst_amount NUMERIC,
+cgst_amount NUMERIC, sgst_amount NUMERIC, tcs_amount NUMERIC, total_amount NUMERIC,
+status VARCHAR (draft/sent/approved/dispatched/invoiced/cancelled),
+parent_order_id UUID FK -> sales_orders (self-ref, for revisions), revision_number SMALLINT, is_cancelled BOOLEAN,
+tenant_id, organization_id, created_at, updated_at, deleted_at
+
+### sales_order_lines
+line_id UUID PK, order_id UUID FK, line_number SMALLINT, variant_id UUID FK,
+num_packages INT, qty_kg NUMERIC, rate_per_mt NUMERIC, line_amount NUMERIC,
+tenant_id, organization_id, created_at, updated_at
+
+### sales_pi_sequences
+fy_key SMALLINT PK, last_seq INT
+
+### finance_outstanding
+outstanding_id UUID PK, party_id UUID FK -> customers,
+party_type VARCHAR (debtor/creditor), ref_number VARCHAR, tally_voucher_ref VARCHAR,
+transaction_type VARCHAR, transaction_date DATE, due_date DATE,
+opening_amount NUMERIC, pending_amount NUMERIC, overdue_days INT,
+linked_order_id UUID FK -> sales_orders (nullable),
+synced_at TIMESTAMPTZ, tenant_id, organization_id, created_at, updated_at
+
+### finance_outstanding_alerts
+alert_id UUID PK, outstanding_id UUID FK, party_id UUID FK, party_type VARCHAR,
+overdue_days INT, pending_amount NUMERIC, threshold_days INT (30/60/90),
+is_acknowledged BOOLEAN, acknowledged_by VARCHAR, acknowledged_at TIMESTAMPTZ,
+triggered_at TIMESTAMPTZ, tenant_id, organization_id
+
+---
+
+## GLOBAL FILTER SYSTEM
+
+This is the most important architectural decision. Every page in the app shares a single global filter context. Filters persist as URL query parameters so links are shareable and the back button works.
+
+### Filter state (React Context + URL params)
+```typescript
+interface GlobalFilters {
+  dateFrom:    string | null   // ISO date, inclusive — applied to order_date
+  dateTo:      string | null   // ISO date, inclusive
+  fyKey:       number | null   // e.g. 26 for FY 2025-26
+  customerId:  string | null   // UUID — filters by buyer_id OR consignee_id
+  consigneeId: string | null   // UUID — filters consignee_id specifically
+  agentId:     string | null   // UUID
+  status:      string | null   // draft|sent|approved|dispatched|invoiced|cancelled
+  piFrom:      number | null   // seq_number range start (inclusive)
+  piTo:        number | null   // seq_number range end (inclusive)
+}
+```
+
+### Filter bar component (persistent, appears on every page below the nav)
+- Date range: two date pickers (from / to), both inclusive. Selecting a FY preset auto-fills date range to Apr 1 – Mar 31 of that year (or today if current FY).
+- FY dropdown: populated from lookup_financial_years, shows fy_label. Selecting FY auto-sets date range.
+- Customer dropdown: searchable, populated from customers table. Typing filters the list.
+- Consignee dropdown: same customers table, separate field.
+- Agent dropdown: populated from catalog_agents.
+- Status dropdown: static list ['draft','sent','approved','dispatched','invoiced','cancelled'], multi-select.
+- PI # range: two number inputs (from seq_number, to seq_number).
+- "N filters active" badge showing count of active non-default filters.
+- "Clear all" button resets all filters.
+- All filters are optional. No filter = show all data.
+
+### How filters affect every page
+Every API call on every page passes all active filters as query parameters. The backend SQL applies them as WHERE clauses:
+
+```sql
+SELECT * FROM v_sales_orders_summary
+WHERE 1=1
+  AND ($1::date IS NULL OR order_date >= $1)
+  AND ($2::date IS NULL OR order_date <= $2)
+  AND ($3::int  IS NULL OR fy_key = $3)
+  AND ($4::uuid IS NULL OR buyer_id = $4 OR consignee_id = $4)
+  AND ($5::uuid IS NULL OR consignee_id = $5)
+  AND ($6::uuid IS NULL OR agent_id = $6)
+  AND ($7::text IS NULL OR status = $7)
+  AND ($8::int  IS NULL OR seq_number >= $8)
+  AND ($9::int  IS NULL OR seq_number <= $9)
+ORDER BY order_date DESC, seq_number DESC
+```
+
+The Dashboard KPI numbers MUST update when filters change. Every number on every page is always filter-aware. When a filter is active, show a small "filtered" badge on the relevant KPI card so the user knows they are not seeing the full dataset.
+
+---
+
+## PAGES
+
+### 1. Dashboard  /
+
+KPI cards (all filter-aware):
+- Orders in range (count) + "of X total" sub-label showing unfiltered count
+- Revenue in range (SUM of total_amount) + "of X total" sub-label
+- Average order value for the filtered set
+- Outstanding total pending (from v_customer_outstanding, filtered by customer if customer filter active)
+
+Two panels below:
+- Overdue alerts: list from v_customer_outstanding WHERE max_overdue_days > 0, filtered by active customer filter if set. Colour-coded: red = 90+ days, orange = 60-89 days, yellow = 30-59 days. Shows party name, total pending, max overdue days, link to party detail.
+- Recent orders: last 5-10 orders matching current filters. Columns: PI#, buyer, agent, amount, status pill.
+
+When ANY filter is active, show a "filtered" indicator badge on affected KPI cards.
+
+---
+
+### 2. Sales Orders list  /orders
+
+Table columns: PI#, FY, date, buyer, consignee, agent, total (INR), status, line count.
+- All global filters apply automatically via the filter bar.
+- Additional column-level sort: click any column header to sort asc/desc.
+- Search bar (client-side) for quick search within current results by PI# or buyer name.
+- Status pills colour-coded: draft=gray, sent=blue, approved=blue, dispatched=orange, invoiced=green, cancelled=red.
+- Pagination: 50 rows per page.
+- "Export CSV" button exports the current filtered result set.
+- "+ New PI" button navigates to /orders/new.
+- Click any row to navigate to /orders/:id.
+
+---
+
+### 3. New PI form  /orders/new
+
+Multi-section form. Layout: full-width scrollable form with a sticky totals sidebar on the right.
+
+SECTION 1 — PI header (auto-generated fields, read-only)
+- Financial year: dropdown from lookup_financial_years WHERE is_current=TRUE pre-selected
+- PI number: call GET /api/pi/next-number?fyKey=26 on mount → display read-only. Show a spinner while fetching.
+- Order date: date picker, default today
+
+SECTION 2 — Bill to (buyer)
+- Party name: searchable dropdown from customers. On select, auto-fill:
+  - GSTIN from customers.gstin
+  - State from customers.primary_state_code joined to lookup_state_codes.state_name
+  - Address from customers.primary_address
+- All auto-filled fields remain editable so user can override for this specific order.
+- Buyer PO number: free text input
+- PO date: date picker
+- IMMEDIATELY after buyer is selected: call GET /api/customers/:id/outstanding and render an alert banner if any outstanding exists:
+  - Yellow banner if max_overdue_days is 30-59 days
+  - Orange banner if max_overdue_days is 60-89 days
+  - Red banner if max_overdue_days is 90+ days
+  - Banner text: "This party has INR [total_pending] outstanding — [max_overdue_days] days overdue. Review before approving." with a "View full outstanding →" link.
+
+SECTION 3 — Ship to (consignee)
+- Checkbox: "Same as buyer" (checked by default)
+- When unchecked: show identical searchable party dropdown + GSTIN + state + address fields for the consignee
+
+SECTION 4 — Commercial terms
+- Agent: dropdown from catalog_agents (shows agent_name)
+- Payment terms: free text input with datalist suggestions pulled from DISTINCT payment_terms in sales_orders
+- Freight description: free text with datalist: "Door Delivery", "TO PAY", "Party Tempo", "BEST"
+- Freight per kg: number input (INR)
+- Insurance %: number input (default 0.5)
+- GST type: AUTO-CALCULATED based on buyer_state_code vs company state code 24 (Gujarat):
+  - If buyer_state_code == 24 → CGST_SGST (show "CGST + SGST @ 9% each")
+  - Else → IGST (show "IGST @ 18%")
+  - User can override via dropdown if needed
+- IGST rate, CGST rate, TCS rate: number inputs, pre-filled based on GST type
+- Schedule notes: textarea
+
+SECTION 5 — Line items
+Dynamic table. Columns:
+- # (auto-numbered)
+- SKU: searchable dropdown from catalog_product_variants showing full_description. On select, auto-show grade, packaging type, HS code as read-only sub-text.
+- Qty (kg): number input
+- Packages: AUTO-CALCULATED = Math.ceil(qty_kg / variant.qty_per_pkg), displayed read-only. Show 0 if qty_per_pkg is null.
+- Rate (INR/MT): number input
+- Amount (INR): AUTO-CALCULATED = (qty_kg / 1000) * rate_per_mt, read-only
+- X remove button
+
+"+ Add line item" button adds a new empty row below the table.
+
+STICKY TOTALS SIDEBAR (updates live as user types):
+- Gross value = SUM of all line amounts
+- Insurance = gross_value * insurance_pct
+- Freight = gross_value * freight_per_kg / 1000
+- Assessable value = gross + insurance + freight
+- IGST amount = assessable * igst_rate (shown only if gst_type = IGST)
+- CGST amount = assessable * cgst_rate (shown only if gst_type = CGST_SGST)
+- SGST amount = assessable * cgst_rate (same as CGST, shown only if gst_type = CGST_SGST)
+- TCS amount = assessable * tcs_rate
+- TOTAL = assessable + igst + cgst + sgst + tcs
+
+ACTION BUTTONS at bottom:
+- "Save draft" → POST /api/orders with status='draft'
+- "Preview PI" → opens a print-layout modal formatted like a Proforma Invoice
+- "Submit for approval" → POST /api/orders with status='sent'
+
+---
+
+### 4. PI Detail / Edit  /orders/:id
+
+Two modes: View (default) and Edit (toggled by Edit button).
+
+View mode layout:
+- Header section: PI number (large), status badge, order date, FY, revision info
+- All header fields as key-value pairs in a grid (buyer, consignee, agent, terms, GST type, etc.)
+- Line items table (read-only): SKU description, qty, rate, packages, amount
+- Totals panel on the right
+- Revision chain: if parent_order_id exists show "Revised from PI [number]" with a link. If this PI has a child revision show "Superseded by PI [number]" with a link.
+- Status timeline: draft → sent → approved → dispatched → invoiced (highlight current step)
+- Action buttons based on current status:
+  - draft: "Submit for approval" | "Edit" | "Cancel PI"
+  - sent: "Mark approved" | "Cancel PI"
+  - approved: "Mark dispatched" | "Cancel PI"
+  - dispatched: "Mark invoiced"
+  - invoiced: "Revise PI"
+  - cancelled: "Revise PI"
+
+Edit mode: same form layout as New PI but pre-populated with existing values.
+
+Revise PI flow:
+1. Call GET /api/pi/next-number to get a new PI number
+2. POST /api/orders/:id/revise → backend creates new sales_order copying ALL fields, sets parent_order_id = original order_id, revision_number = original.revision_number + 1
+3. The DB trigger fn_cancel_parent_on_revision() automatically cancels the original — DO NOT cancel the parent in application code
+4. Redirect to /orders/:newId
+
+Outstanding sidebar panel on PI detail:
+- Shows v_customer_outstanding data for the buyer_id
+- Total pending, max overdue days, colour-coded
+- "View full outstanding for this party →" link to /finance/outstanding?customerId=:buyerId
+
+---
+
+### 5. Customers list  /customers
+
+Table columns: party name, GSTIN, state, total pending (from v_customer_outstanding), max overdue days (colour-coded badge), total orders count, last order date.
+- Global filters apply (customer filter highlights/filters to that customer).
+- Search bar: filter by party name or GSTIN (client-side within current result set).
+- Sort by any column header.
+- Click any row to navigate to /customers/:id.
+
+---
+
+### 6. Customer detail  /customers/:id
+
+Left column (60% width):
+- Party profile card: all fields (name, GSTIN, state, address, phone, email, tally_ref, notes). Edit button opens inline editing.
+- Outstanding summary: 4 KPI chips (total pending, max overdue days, 90+ days bucket amount, 60-89 days bucket amount). Colour-coded backgrounds.
+- Outstanding ledger table: ref_number, transaction_date, due_date, opening_amount, pending_amount, overdue_days, transaction_type. Rows colour-coded by overdue band (red/orange/yellow/transparent).
+
+Right column (40% width):
+- Order history table: PI#, date, total, status pill. Global date / agent / status filters apply here too.
+- "New PI for this customer" button → /orders/new?buyerId=:id (pre-fills the buyer dropdown)
+
+---
+
+### 7. Catalog — Products  /catalog/products
+
+Table: product_name, hs_code, item_type badge, variant count, is_active toggle.
+Expandable rows: clicking a product row expands to show all its variants (grade, qty_per_pkg, packaging type, full_description, is_active).
+"+ Add product" button → modal form with fields: product_name, hs_code, item_type dropdown, description.
+"+ Add variant" button per product → modal form with fields: grade, qty_per_pkg, pkg_id dropdown, full_description (auto-built from combination but editable).
+Edit and deactivate/reactivate in-place for both products and variants.
+
+Also show:
+- Agents sub-page at /catalog/agents: table of all agents with add/edit/deactivate.
+
+---
+
+### 8. Finance — Outstanding  /finance/outstanding
+
+Tab bar: Sundry Debtors | Sundry Creditors | Alerts
+
+Debtors tab:
+- Global customer filter: if active, shows only that party's rows.
+- Global date filter: applies to finance_outstanding.transaction_date on this page.
+- KPI row (filter-aware): total pending, 90+ days amount, 60-89 days amount, 30-59 days amount.
+- Table columns: party name, GSTIN, bill count, total pending, max overdue days, 90+ days bucket, 60-89 days bucket, 30-59 days bucket, "View" button.
+- Row colour-coding: red row background if max_overdue_days >= 90, orange if >= 60, yellow if >= 30, transparent otherwise.
+- Clicking "View" or a row opens the customer detail page at /customers/:id.
+
+Creditors tab: identical structure but party_type = 'creditor'.
+
+Alerts tab:
+- Toggle: "Unacknowledged only" (default) vs "Show all"
+- Table columns: party name, pending amount, overdue days, threshold band (30/60/90 day badge), triggered at timestamp, "Acknowledge" button.
+- "Acknowledge" button calls PATCH /api/finance/alerts/:id with { is_acknowledged: true, acknowledged_by: 'current_user' }.
+- Filter by threshold band (30 / 60 / 90 day buttons).
+
+Re-sync Tally data section (at top of Finance page):
+- "Upload Tally export (.xlsx)" button → file picker accepting .xlsx only.
+- On upload: POST /api/finance/sync with the file as multipart form data.
+- Backend deletes existing finance_outstanding rows and reloads from the uploaded file (same logic as the original migration Step 6).
+- Show "Last synced: [timestamp from MAX(synced_at)]" pulled from GET /api/finance/outstanding/summary.
+- Show a loading state during upload and a success toast when done.
+
+---
+
+### 9. Settings  /settings
+
+Four tabs:
+
+State codes tab: read-only table of all 37 Indian GST state codes (state_code, state_name, region). No editing.
+
+Financial years tab: table with fy_key, fy_label, start_date, end_date, is_current toggle. Only one FY can be is_current=TRUE at a time — toggling one on automatically turns others off. "Add financial year" button opens a modal form.
+
+Packaging types tab: table with pkg_id, pkg_name. "Add" button, inline rename, delete button (disabled if that packaging type is used by any active variant — show tooltip explaining why).
+
+Agents tab: table with agent_name, contact_phone, contact_email, is_active. Add / edit / deactivate inline.
+
+---
+
+## API ROUTES (Express backend)
+
+All GET endpoints that accept filters use the same parameter names:
+dateFrom, dateTo, fyKey, customerId, consigneeId, agentId, status, piFrom, piTo
+
+```
+GET  /api/dashboard?[filters]
+     Returns: { ordersCount, ordersTotal, ordersCountAll, ordersTotalAll,
+                avgOrderValue, outstandingTotal, recentOrders[], overdueAlerts[] }
+
+GET  /api/orders?[filters]&page=&limit=50
+     Returns: { data: order[], total: number, page: number }
+
+POST /api/orders
+     Body: { header fields, lines: [{ variant_id, qty_kg, rate_per_mt }] }
+     Returns: created order with order_id and pi_number
+
+GET  /api/orders/:id
+     Returns: order with all fields + lines array
+
+PUT  /api/orders/:id
+     Body: same as POST. Replaces all line items (delete old, insert new).
+
+PATCH /api/orders/:id/status
+     Body: { status: string }
+     Returns: updated order
+
+POST /api/orders/:id/revise
+     Creates revision. Returns new order object.
+
+GET  /api/pi/next-number?fyKey=
+     Calls SELECT get_next_pi_number($1). Returns: { piNumber: string, seqNumber: number }
+
+GET  /api/customers?[filters]&search=&page=&limit=50
+     Joins with v_customer_outstanding. Returns paginated list.
+
+GET  /api/customers/:id
+     Returns customer detail + outstanding summary from v_customer_outstanding.
+
+POST /api/customers
+     Creates new customer.
+
+PUT  /api/customers/:id
+     Updates customer.
+
+GET  /api/customers/:id/outstanding
+     Returns v_customer_outstanding row for this customer_id.
+
+GET  /api/customers/:id/orders?[filters]
+     Returns orders where buyer_id = :id or consignee_id = :id.
+
+GET  /api/catalog/products?search=
+     Returns products with variant_count.
+
+POST /api/catalog/products
+PUT  /api/catalog/products/:id
+
+GET  /api/catalog/products/:id/variants
+POST /api/catalog/variants
+PUT  /api/catalog/variants/:id
+
+GET  /api/catalog/agents
+POST /api/catalog/agents
+PUT  /api/catalog/agents/:id
+
+GET  /api/finance/outstanding?partyType=debtor|creditor&[filters]
+     Returns rows from finance_outstanding joined with customers.
+
+GET  /api/finance/outstanding/summary?partyType=
+     Returns KPI aggregates: { totalPending, bucket90plus, bucket60to89, bucket30to59, lastSyncedAt }
+
+GET  /api/finance/alerts?acknowledged=false&thresholdDays=
+     Returns finance_outstanding_alerts joined with customers.
+
+PATCH /api/finance/alerts/:id
+     Body: { is_acknowledged: true, acknowledged_by: string }
+
+POST /api/finance/sync
+     Accepts multipart XLSX upload. Truncates finance_outstanding and reloads.
+     Returns: { inserted: number, syncedAt: string }
+
+GET  /api/lookup/states
+GET  /api/lookup/financial-years
+PATCH /api/lookup/financial-years/:fyKey/set-current
+
+GET  /api/lookup/packaging-types
+POST /api/lookup/packaging-types
+PUT  /api/lookup/packaging-types/:id
+DELETE /api/lookup/packaging-types/:id  (only if not in use)
+
+GET  /api/lookup/payment-terms-suggestions
+     Returns DISTINCT payment_terms FROM sales_orders WHERE payment_terms IS NOT NULL ORDER BY 1
+```
+
+---
+
+## KEY BEHAVIOURS AND CONSTRAINTS
+
+1. Never run DDL (CREATE TABLE, DROP TABLE, ALTER TABLE). Read and write data only.
+
+2. The PI number (pi_number) is ALWAYS generated by calling the PostgreSQL function get_next_pi_number(fy_key). Never generate it in JavaScript. Call SELECT get_next_pi_number($1) and use the returned string.
+
+3. When creating a new order: INSERT the order header first (returning order_id), then INSERT each line item referencing that order_id in a loop or batch.
+
+4. The DB trigger fn_cancel_parent_on_revision() handles cancelling the parent PI when a revision is inserted. Do NOT cancel the parent in application code — the DB handles it automatically.
+
+5. GST type auto-calculation: company's home state is Gujarat (state_code = 24). Rule: if buyer_state_code == 24 then gst_type = 'CGST_SGST', else gst_type = 'IGST'. User can override this in the form.
+
+6. Line item packages calculation: Math.ceil(qty_kg / variant.qty_per_pkg). If qty_per_pkg is null or 0, display 0.
+
+7. All monetary calculations happen client-side in real time for live preview (totals sidebar). The server recalculates and stores the final values on save.
+
+8. Outstanding row colour-coding rule: overdue_days >= 90 → red background, >= 60 → orange background, >= 30 → yellow background, else no background colour.
+
+9. The "filtered" badge on KPI cards appears whenever any filter other than the default current FY is active.
+
+10. Filters are AND-ed across different fields. Multi-select within the same field (e.g. multiple statuses) is OR-ed: status IN (...).
+
+11. Date range filter on Dashboard and Orders pages applies to sales_orders.order_date. On the Finance page it applies to finance_outstanding.transaction_date.
+
+12. Export CSV: construct a Blob client-side from the current filtered result set and trigger a browser download. Include all visible columns.
+
+13. The /orders/new route accepts an optional ?buyerId= query param. If present, pre-select and pre-fill the buyer section.
+
+14. Status transitions are one-directional: draft → sent → approved → dispatched → invoiced. Cancelled is terminal except it allows creating a revision. Do not allow backwards transitions in the UI.
+
+---
+
+## COMPONENT LIBRARY
+
+Use shadcn/ui for:
+- Dialog (modals for add/edit forms)
+- Popover + Command (searchable dropdowns for customer, variant, agent selection)
+- Calendar + Popover (date pickers)
+- Table (all data tables)
+- Badge (status pills, overdue bands)
+- Tabs (Finance page tabs, Settings tabs)
+- Sheet (slide-in side panels)
+- Toast (success/error notifications)
+- Skeleton (loading states for all data tables and KPI cards)
+
+Build these custom components:
+- FilterBar — the global filter bar, reads and writes URL params via useSearchParams from React Router
+- FilteredKpiCard — KPI card with value, label, sub-label, and optional "filtered" badge
+- StatusBadge — colour-coded status pill (draft/sent/approved/dispatched/invoiced/cancelled)
+- OverdueBadge — colour-coded overdue days badge (red >= 90, orange >= 60, yellow >= 30, green = not overdue)
+- OutstandingWarningBanner — fetches outstanding for a given customer_id and renders the coloured warning banner
+- PiLineItemsTable — the dynamic add/remove line items table with live calculations
+- TotalsSidebar — sticky sidebar showing live-calculated PI totals, accepts order header fields and line items as props
+
+---
+
+## FILE STRUCTURE
+
+```
+/
+├── apps/
+│   ├── web/                         # React frontend (Vite)
+│   │   ├── src/
+│   │   │   ├── components/
+│   │   │   │   ├── ui/              # shadcn auto-generated components
+│   │   │   │   ├── FilterBar.tsx
+│   │   │   │   ├── FilteredKpiCard.tsx
+│   │   │   │   ├── StatusBadge.tsx
+│   │   │   │   ├── OverdueBadge.tsx
+│   │   │   │   ├── OutstandingWarningBanner.tsx
+│   │   │   │   ├── PiLineItemsTable.tsx
+│   │   │   │   └── TotalsSidebar.tsx
+│   │   │   ├── pages/
+│   │   │   │   ├── Dashboard.tsx
+│   │   │   │   ├── orders/
+│   │   │   │   │   ├── OrdersList.tsx
+│   │   │   │   │   ├── OrderDetail.tsx
+│   │   │   │   │   └── NewOrder.tsx
+│   │   │   │   ├── customers/
+│   │   │   │   │   ├── CustomersList.tsx
+│   │   │   │   │   └── CustomerDetail.tsx
+│   │   │   │   ├── catalog/
+│   │   │   │   │   └── Products.tsx
+│   │   │   │   ├── finance/
+│   │   │   │   │   └── Outstanding.tsx
+│   │   │   │   └── Settings.tsx
+│   │   │   ├── hooks/
+│   │   │   │   ├── useFilters.ts    # reads and writes URL params
+│   │   │   │   ├── useOrders.ts
+│   │   │   │   ├── useCustomers.ts
+│   │   │   │   ├── useFinance.ts
+│   │   │   │   └── useCatalog.ts
+│   │   │   ├── context/
+│   │   │   │   └── FiltersContext.tsx
+│   │   │   ├── lib/
+│   │   │   │   ├── api.ts           # typed fetch wrapper for all API calls
+│   │   │   │   └── calculations.ts  # PI totals calculations (pure functions)
+│   │   │   └── App.tsx
+│   │   ├── index.html
+│   │   └── vite.config.ts
+│   │
+│   └── api/                         # Express backend
+│       ├── src/
+│       │   ├── routes/
+│       │   │   ├── dashboard.ts
+│       │   │   ├── orders.ts
+│       │   │   ├── customers.ts
+│       │   │   ├── catalog.ts
+│       │   │   ├── finance.ts
+│       │   │   └── lookup.ts
+│       │   ├── db/
+│       │   │   ├── client.ts        # Neon connection pool setup
+│       │   │   └── queries/
+│       │   │       ├── orders.ts
+│       │   │       ├── customers.ts
+│       │   │       ├── finance.ts
+│       │   │       └── catalog.ts
+│       │   ├── middleware/
+│       │   │   └── filters.ts       # parses filter query params, validates types
+│       │   └── index.ts
+│       ├── .env
+│       └── tsconfig.json
+│
+├── package.json                     # monorepo root (yarn workspaces)
+└── turbo.json                       # optional: turborepo for parallel builds
+```
+
+---
+
+## DEPLOYMENT
+
+Frontend → Vercel:
+- Root directory: apps/web
+- Build command: yarn build
+- Output directory: dist
+- Environment variable: VITE_API_URL=https://your-render-app.onrender.com
+
+Backend → Render:
+- Root directory: apps/api
+- Build command: yarn build
+- Start command: node dist/index.js
+- Environment variable: DATABASE_URL=[your Neon unpooled connection string]
+
+CORS: the Express backend must allow requests from the Vercel frontend domain. Use the cors package and set the origin to the Vercel deployment URL.
+
+---
+
+## START HERE — BUILD ORDER
+
+Build in this exact order to validate the full stack before going wide:
+
+Step 1: Scaffold the monorepo with yarn workspaces (apps/web using Vite + React + TypeScript, apps/api using Express + TypeScript).
+
+Step 2: Set up the Neon database connection in apps/api/src/db/client.ts. Use the 'postgres' npm package (not pg). Test with a simple SELECT 1 query.
+
+Step 3: Build all /api/lookup/* routes first — states, financial years, packaging types, agents. These are simple SELECTs with no filter logic and will validate the DB connection.
+
+Step 4: Build FiltersContext.tsx and useFilters.ts with full URL param sync. Build the FilterBar component. Verify that changing filters updates the URL and that refreshing the page restores the filter state.
+
+Step 5: Build the Dashboard page end-to-end — API route with filter SQL, React page with KPI cards and the two panels. Verify that changing filters live-updates all numbers. This proves the full stack works.
+
+Step 6: Build the Sales Orders list and New PI form — these are the highest-priority user-facing features.
+
+Step 7: Build PI Detail with status transitions and the Revise PI flow.
+
+Step 8: Build Customers list and Customer detail.
+
+Step 9: Build Finance — Outstanding with the three tabs and Tally sync upload.
+
+Step 10: Build Catalog — Products and Settings.
+
+After each page is working, verify that the global filters affect the numbers on that page before moving to the next one.
+
+IMPORTANT: Ask me for the DATABASE_URL before starting Step 2. Do not proceed with any database connection until I provide it.

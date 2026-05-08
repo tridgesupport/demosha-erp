@@ -1,19 +1,24 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchStates, fetchFinancialYears, setCurrentFY, createFY, fetchPackagingTypes, createPackagingType, updatePackagingType, deletePackagingType, fetchAgents, createAgent, updateAgent } from '@/lib/api';
-import { Edit2, Trash2, Plus, Save, X } from 'lucide-react';
+import { fetchStates, fetchFinancialYears, setCurrentFY, createFY, fetchPackagingTypes, createPackagingType, updatePackagingType, deletePackagingType, fetchAgents, createAgent, updateAgent, uploadSignature } from '@/lib/api';
+import { useAuth } from '@/context/AuthContext';
+import { Edit2, Trash2, Plus, Save, X, Upload } from 'lucide-react';
 
-type Tab = 'states' | 'financial-years' | 'packaging' | 'agents';
+const BASE = import.meta.env.VITE_API_URL ?? '';
+function authHeader(): Record<string, string> { const t = localStorage.getItem('token'); return t ? { Authorization: `Bearer ${t}` } : {}; }
+
+type Tab = 'profile' | 'users' | 'states' | 'financial-years' | 'packaging' | 'agents';
 
 export default function Settings() {
-  const [tab, setTab] = useState<Tab>('states');
+  const { user } = useAuth();
+  const [tab, setTab] = useState<Tab>('profile');
 
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
 
-      <div className="flex border-b border-gray-200">
-        {(['states', 'financial-years', 'packaging', 'agents'] as Tab[]).map((t) => (
+      <div className="flex border-b border-gray-200 flex-wrap">
+        {(['profile', ...(user?.role === 'admin' ? ['users'] : []), 'states', 'financial-years', 'packaging', 'agents'] as Tab[]).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -26,6 +31,8 @@ export default function Settings() {
         ))}
       </div>
 
+      {tab === 'profile' && <ProfileTab />}
+      {tab === 'users' && user?.role === 'admin' && <UsersTab />}
       {tab === 'states' && <StatesTab />}
       {tab === 'financial-years' && <FYTab />}
       {tab === 'packaging' && <PackagingTab />}
@@ -294,6 +301,190 @@ function AgentsTab() {
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  );
+}
+
+function ProfileTab() {
+  const { user, refreshUser } = useAuth();
+  const qc = useQueryClient();
+  const [uploading, setUploading] = useState(false);
+  const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
+  const [pwError, setPwError] = useState('');
+  const [pwSuccess, setPwSuccess] = useState(false);
+
+  const handleSignatureUpload = async (file: File) => {
+    if (!user) return;
+    setUploading(true);
+    try {
+      await uploadSignature(user.user_id, file);
+      await refreshUser();
+    } finally { setUploading(false); }
+  };
+
+  const handlePasswordChange = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setPwError(''); setPwSuccess(false);
+    if (pwForm.next !== pwForm.confirm) { setPwError('Passwords do not match'); return; }
+    const res = await fetch(`${BASE}/api/auth/password`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeader() },
+      body: JSON.stringify({ current_password: pwForm.current, new_password: pwForm.next }),
+    });
+    if (res.ok) { setPwSuccess(true); setPwForm({ current: '', next: '', confirm: '' }); }
+    else { const e = await res.json(); setPwError(e.error ?? 'Failed'); }
+  };
+
+  return (
+    <div className="space-y-6 max-w-lg">
+      <div className="bg-white border border-gray-200 rounded-lg p-5">
+        <h2 className="font-semibold text-gray-800 mb-4">My Profile</h2>
+        <div className="space-y-2 text-sm">
+          <div className="flex gap-2"><span className="text-gray-400 w-24">Name:</span><span>{user?.name}</span></div>
+          <div className="flex gap-2"><span className="text-gray-400 w-24">Email:</span><span>{user?.email}</span></div>
+          <div className="flex gap-2"><span className="text-gray-400 w-24">Role:</span><span className="capitalize">{user?.role}</span></div>
+        </div>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-lg p-5">
+        <h2 className="font-semibold text-gray-800 mb-4">Signature</h2>
+        {user?.signature_url && (
+          <div className="mb-3 p-3 border border-gray-100 rounded bg-gray-50 inline-block">
+            <img src={user.signature_url} alt="Your signature" className="max-h-16 max-w-xs object-contain" />
+          </div>
+        )}
+        <label className={`flex items-center gap-2 cursor-pointer px-4 py-2 border border-gray-300 rounded text-sm w-fit hover:bg-gray-50 ${uploading ? 'opacity-50' : ''}`}>
+          <Upload className="w-4 h-4" />
+          {user?.signature_url ? 'Replace Signature' : 'Upload Signature'}
+          <input type="file" className="hidden" accept=".png,.jpg,.jpeg"
+            onChange={(e) => e.target.files?.[0] && handleSignatureUpload(e.target.files[0])} />
+        </label>
+        <p className="text-xs text-gray-400 mt-1">PNG with transparent background recommended.</p>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-lg p-5">
+        <h2 className="font-semibold text-gray-800 mb-4">Change Password</h2>
+        <form onSubmit={handlePasswordChange} className="space-y-3">
+          {['current', 'next', 'confirm'].map((f) => (
+            <div key={f}>
+              <label className="block text-xs text-gray-500 mb-1">
+                {f === 'current' ? 'Current Password' : f === 'next' ? 'New Password' : 'Confirm New Password'}
+              </label>
+              <input type="password" className="input w-full" value={(pwForm as any)[f]}
+                onChange={(e) => setPwForm(p => ({ ...p, [f]: e.target.value }))} required />
+            </div>
+          ))}
+          {pwError && <p className="text-xs text-red-600">{pwError}</p>}
+          {pwSuccess && <p className="text-xs text-green-600">Password changed successfully.</p>}
+          <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">Update Password</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function UsersTab() {
+  const qc = useQueryClient();
+  const [form, setForm] = useState({ name: '', email: '', role: 'salesperson', password: '' });
+  const [error, setError] = useState('');
+  const [resetId, setResetId] = useState<string | null>(null);
+  const [newPw, setNewPw] = useState('');
+
+  const { data: users = [] } = useQuery({
+    queryKey: ['admin-users'],
+    queryFn: () => fetch(`${BASE}/api/auth/users`, { headers: authHeader() }).then(r => r.json()),
+  });
+
+  const createUser = async (e: React.FormEvent) => {
+    e.preventDefault(); setError('');
+    const res = await fetch(`${BASE}/api/auth/register`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeader() },
+      body: JSON.stringify(form),
+    });
+    if (res.ok) { setForm({ name: '', email: '', role: 'salesperson', password: '' }); qc.invalidateQueries({ queryKey: ['admin-users'] }); }
+    else { const e = await res.json(); setError(e.error ?? 'Failed'); }
+  };
+
+  const deleteUser = async (id: string) => {
+    if (!confirm('Delete this user?')) return;
+    await fetch(`${BASE}/api/auth/users/${id}`, { method: 'DELETE', headers: authHeader() });
+    qc.invalidateQueries({ queryKey: ['admin-users'] });
+  };
+
+  const resetPassword = async (id: string) => {
+    if (!newPw || newPw.length < 6) return;
+    await fetch(`${BASE}/api/auth/users/${id}/reset-password`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeader() },
+      body: JSON.stringify({ new_password: newPw }),
+    });
+    setResetId(null); setNewPw('');
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+        <div className="px-4 py-3 border-b bg-gray-50 font-semibold text-sm text-gray-700">Users</div>
+        <table className="w-full text-sm">
+          <thead><tr className="border-b text-xs text-gray-400 uppercase">
+            <th className="px-4 py-2 text-left">Name</th>
+            <th className="px-4 py-2 text-left">Email</th>
+            <th className="px-4 py-2 text-left">Role</th>
+            <th className="px-4 py-2 text-left">Created</th>
+            <th className="px-4 py-2 text-right">Actions</th>
+          </tr></thead>
+          <tbody className="divide-y">
+            {(users as any[]).map((u: any) => (
+              <tr key={u.user_id}>
+                <td className="px-4 py-2 font-medium">{u.name}</td>
+                <td className="px-4 py-2 text-gray-500">{u.email}</td>
+                <td className="px-4 py-2 capitalize">{u.role}</td>
+                <td className="px-4 py-2 text-gray-400">{new Date(u.created_at).toLocaleDateString()}</td>
+                <td className="px-4 py-2 text-right">
+                  <div className="flex gap-2 justify-end">
+                    {resetId === u.user_id ? (
+                      <>
+                        <input type="password" placeholder="New password" className="border border-gray-300 rounded px-2 py-1 text-xs w-28"
+                          value={newPw} onChange={(e) => setNewPw(e.target.value)} />
+                        <button onClick={() => resetPassword(u.user_id)} className="text-xs text-blue-600 hover:underline">Save</button>
+                        <button onClick={() => setResetId(null)} className="text-xs text-gray-400 hover:underline">Cancel</button>
+                      </>
+                    ) : (
+                      <>
+                        <button onClick={() => { setResetId(u.user_id); setNewPw(''); }} className="text-xs text-gray-400 hover:text-blue-600">Reset PW</button>
+                        <button onClick={() => deleteUser(u.user_id)} className="text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
+                      </>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="bg-white border border-gray-200 rounded-lg p-5 max-w-md">
+        <h2 className="font-semibold text-gray-800 mb-4 text-sm">Add User</h2>
+        <form onSubmit={createUser} className="space-y-3">
+          {[['name', 'Full Name', 'text'], ['email', 'Email', 'email'], ['password', 'Temporary Password', 'password']].map(([f, label, type]) => (
+            <div key={f}>
+              <label className="block text-xs text-gray-500 mb-1">{label}</label>
+              <input type={type} className="input w-full" value={(form as any)[f]}
+                onChange={(e) => setForm(p => ({ ...p, [f]: e.target.value }))} required />
+            </div>
+          ))}
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Role</label>
+            <select className="input w-full" value={form.role} onChange={(e) => setForm(p => ({ ...p, role: e.target.value }))}>
+              <option value="salesperson">Salesperson</option>
+              <option value="manager">Manager</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          {error && <p className="text-xs text-red-600">{error}</p>}
+          <button type="submit" className="flex items-center gap-1 px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">
+            <Plus className="w-4 h-4" /> Add User
+          </button>
+        </form>
       </div>
     </div>
   );

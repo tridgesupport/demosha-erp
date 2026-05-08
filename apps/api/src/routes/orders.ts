@@ -1,9 +1,11 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { filtersMiddleware } from '../middleware/filters';
+import { requireAuth, requireRole } from '../middleware/auth';
 import sql from '../db/client';
+import { uploadToImagekit } from '../lib/imagekit';
 
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
 const router = Router();
 
@@ -85,7 +87,7 @@ router.get('/next-number', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/upload-po', upload.single('file'), (req: Request, res: Response) => {
+router.post('/upload-po', upload.single('file') as any, (req: Request, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const dataUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
   res.json({ url: dataUrl, name: req.file.originalname });
@@ -173,7 +175,9 @@ router.get('/:id', async (req: Request, res: Response) => {
           fy.fy_label,
           parent.pi_number AS parent_pi_number,
           child.pi_number  AS child_pi_number,
-          child.order_id   AS child_order_id
+          child.order_id   AS child_order_id,
+          u.signature_url  AS approver_signature_url,
+          u.name           AS approver_name
         FROM sales_orders o
         LEFT JOIN customers              b      ON b.customer_id = o.buyer_id
         LEFT JOIN customers              c      ON c.customer_id = o.consignee_id
@@ -182,6 +186,7 @@ router.get('/:id', async (req: Request, res: Response) => {
         LEFT JOIN sales_orders           parent ON parent.order_id = o.parent_order_id
         LEFT JOIN sales_orders           child  ON child.parent_order_id = o.order_id
                                                AND child.deleted_at IS NULL
+        LEFT JOIN users                  u      ON u.email = o.approved_by AND u.deleted_at IS NULL
         WHERE o.order_id = ${id} AND o.deleted_at IS NULL
       `,
       sql`
@@ -279,14 +284,25 @@ router.put('/:id', async (req: Request, res: Response) => {
   }
 });
 
-router.patch('/:id/status', async (req: Request, res: Response) => {
+router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => {
   const { id } = req.params;
   const { status } = req.body;
-  const VALID = ['draft', 'sent', 'approved', 'dispatched', 'invoiced', 'cancelled'];
+  const VALID = ['draft', 'sent', 'approved', 'dispatched', 'invoiced', 'cancelled', 'sent_to_factory'];
   if (!VALID.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+
+  const userEmail = req.user?.email ?? null;
+  const isApproval = status === 'approved';
+  const isSubmission = status === 'sent';
+
   try {
     const rows = await sql`
-      UPDATE sales_orders SET status = ${status}, updated_at = NOW()
+      UPDATE sales_orders SET
+        status     = ${status},
+        updated_at = NOW(),
+        submitted_by = CASE WHEN ${isSubmission} THEN ${userEmail} ELSE submitted_by END,
+        submitted_at = CASE WHEN ${isSubmission} THEN NOW() ELSE submitted_at END,
+        approved_by  = CASE WHEN ${isApproval}   THEN ${userEmail} ELSE approved_by END,
+        approved_at  = CASE WHEN ${isApproval}   THEN NOW()        ELSE approved_at END
       WHERE order_id = ${id} AND deleted_at IS NULL
       RETURNING *
     `;
@@ -296,6 +312,33 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
     console.error(err);
     res.status(500).json({ error: 'Failed to update status' });
   }
+});
+
+router.post('/:id/upload-proforma', requireAuth, upload.single('file') as any, async (req: Request, res: Response) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const { url, fileId } = await uploadToImagekit(req.file.buffer, `proforma_${req.params.id}.pdf`, 'proforma');
+    await sql`UPDATE sales_orders SET proforma_url = ${url}, proforma_file_id = ${fileId} WHERE order_id = ${req.params.id}`;
+    res.json({ url, fileId });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }
+});
+
+router.post('/:id/upload-approved-pi', requireAuth, requireRole('admin', 'manager'), upload.single('file') as any, async (req: Request, res: Response) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const { url, fileId } = await uploadToImagekit(req.file.buffer, `approved_pi_${req.params.id}.pdf`, 'approved_proforma');
+    await sql`UPDATE sales_orders SET approved_pi_url = ${url}, approved_pi_file_id = ${fileId} WHERE order_id = ${req.params.id}`;
+    res.json({ url, fileId });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }
+});
+
+router.post('/:id/upload-sales-bill', requireAuth, upload.single('file') as any, async (req: Request, res: Response) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const { url, fileId } = await uploadToImagekit(req.file.buffer, `sales_bill_${req.params.id}.pdf`, 'factory_sales_bill');
+    await sql`UPDATE sales_orders SET sales_bill_url = ${url}, sales_bill_file_id = ${fileId} WHERE order_id = ${req.params.id}`;
+    res.json({ url, fileId });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }
 });
 
 router.post('/:id/revise', async (req: Request, res: Response) => {

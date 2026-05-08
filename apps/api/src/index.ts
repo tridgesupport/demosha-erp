@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+import authRouter from './routes/auth';
 import dashboardRouter from './routes/dashboard';
 import ordersRouter from './routes/orders';
 import customersRouter from './routes/customers';
@@ -20,6 +21,7 @@ app.use(cors({
 }));
 app.use(express.json());
 
+app.use('/api/auth', authRouter);
 app.use('/api/dashboard', dashboardRouter);
 app.use('/api/pi', ordersRouter);
 app.use('/api/orders', ordersRouter);

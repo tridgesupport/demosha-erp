@@ -6,24 +6,29 @@ import StatusBadge from '@/components/StatusBadge';
 import OverdueBadge from '@/components/OverdueBadge';
 import ProformaInvoice from '@/components/ProformaInvoice';
 import { useCustomerOutstanding } from '@/hooks/useCustomers';
-import { ArrowLeft, CheckCircle, Printer } from 'lucide-react';
+import { useAuth } from '@/context/AuthContext';
+import { uploadApprovedPi, uploadSalesBill } from '@/lib/api';
+import { useQueryClient } from '@tanstack/react-query';
+import { ArrowLeft, CheckCircle, Printer, Upload, FileText, ExternalLink } from 'lucide-react';
 
-const STATUS_FLOW = ['draft', 'sent', 'approved', 'dispatched', 'invoiced'];
+const STATUS_FLOW = ['draft', 'sent', 'approved', 'sent_to_factory', 'dispatched', 'invoiced'];
 
-const NEXT_ACTION: Record<string, { label: string; next: string }> = {
-  draft: { label: 'Submit for Approval', next: 'sent' },
-  sent: { label: 'Mark Approved', next: 'approved' },
-  approved: { label: 'Mark Dispatched', next: 'dispatched' },
-  dispatched: { label: 'Mark Invoiced', next: 'invoiced' },
+const STATUS_LABELS: Record<string, string> = {
+  draft: 'Draft', sent: 'Sent for Approval', approved: 'Approved',
+  sent_to_factory: 'Sent to Factory', dispatched: 'Dispatched',
+  invoiced: 'Invoiced', cancelled: 'Cancelled',
 };
 
 export default function OrderDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
   const { data: order, isLoading } = useOrder(id);
   const updateStatus = useUpdateOrderStatus(id!);
   const revise = useReviseOrder(id!);
   const [confirming, setConfirming] = useState(false);
+  const [uploading, setUploading] = useState<string | null>(null);
 
   const buyerOutstanding = useCustomerOutstanding(order?.buyer_id);
   const printRef = useRef<HTMLDivElement>(null);
@@ -46,11 +51,35 @@ export default function OrderDetail() {
     setTimeout(() => { win.print(); }, 400);
   };
 
+  const handleUpload = async (type: 'approved-pi' | 'sales-bill', file: File) => {
+    setUploading(type);
+    try {
+      if (type === 'approved-pi') await uploadApprovedPi(id!, file);
+      else await uploadSalesBill(id!, file);
+      queryClient.invalidateQueries({ queryKey: ['order', id] });
+    } finally {
+      setUploading(null);
+    }
+  };
+
   if (isLoading) return <div className="animate-pulse h-64 bg-gray-200 rounded-lg" />;
   if (!order) return <div className="text-center py-16 text-gray-400">Order not found</div>;
 
   const o = order as any;
-  const nextAction = NEXT_ACTION[o.status];
+  const isManagerOrAdmin = user?.role === 'manager' || user?.role === 'admin';
+  const isSalesperson = user?.role === 'salesperson';
+
+  // Role-based next action
+  const getNextAction = () => {
+    if (o.status === 'draft') return { label: 'Submit for Approval', next: 'sent' };
+    if (o.status === 'sent' && isManagerOrAdmin) return { label: 'Mark Approved', next: 'approved' };
+    if (o.status === 'approved' && isSalesperson) return { label: 'Sent to Factory', next: 'sent_to_factory' };
+    if (o.status === 'sent_to_factory') return { label: 'Mark Dispatched', next: 'dispatched' };
+    if (o.status === 'dispatched') return { label: 'Mark Invoiced', next: 'invoiced' };
+    return null;
+  };
+
+  const nextAction = getNextAction();
   const canRevise = o.status === 'invoiced' || o.status === 'cancelled';
 
   const handleStatusChange = async () => {
@@ -91,26 +120,27 @@ export default function OrderDetail() {
               )}
             </div>
             <p className="text-sm text-gray-500 mt-1">
-              {o.fy_label} · Order date: {o.order_date ?? 'N/A'}
+              {o.fy_label} · Order date: {o.order_date ? String(o.order_date).slice(0, 10) : 'N/A'}
             </p>
+            {o.submitted_by && (
+              <p className="text-xs text-gray-400 mt-1">Submitted by {o.submitted_by} on {o.submitted_at ? new Date(o.submitted_at).toLocaleString() : ''}</p>
+            )}
+            {o.approved_by && (
+              <p className="text-xs text-gray-400">Approved by {o.approved_by} on {o.approved_at ? new Date(o.approved_at).toLocaleString() : ''}</p>
+            )}
             {o.parent_pi_number && (
               <p className="text-xs text-gray-400 mt-1">
-                Revised from{' '}
-                <Link to={`/orders/${o.parent_order_id}`} className="underline text-blue-600">{o.parent_pi_number}</Link>
+                Revised from <Link to={`/orders/${o.parent_order_id}`} className="underline text-blue-600">{o.parent_pi_number}</Link>
               </p>
             )}
             {o.child_pi_number && (
               <p className="text-xs text-orange-500 mt-1">
-                Superseded by{' '}
-                <Link to={`/orders/${o.child_order_id}`} className="underline">{o.child_pi_number}</Link>
+                Superseded by <Link to={`/orders/${o.child_order_id}`} className="underline">{o.child_pi_number}</Link>
               </p>
             )}
           </div>
-          <div className="flex gap-2">
-            <button
-              onClick={handlePrint}
-              className="flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50"
-            >
+          <div className="flex flex-wrap gap-2 justify-end">
+            <button onClick={handlePrint} className="flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50">
               <Printer className="w-4 h-4" /> Print Pro Forma
             </button>
             {nextAction && o.status !== 'cancelled' && (
@@ -122,20 +152,31 @@ export default function OrderDetail() {
                 {confirming ? `Confirm: ${nextAction.label}` : nextAction.label}
               </button>
             )}
+            {/* Manager: upload approved PI */}
+            {isManagerOrAdmin && ['sent', 'approved', 'sent_to_factory', 'dispatched', 'invoiced'].includes(o.status) && (
+              <label className={`flex items-center gap-1.5 px-4 py-1.5 border border-blue-300 text-blue-700 rounded text-sm hover:bg-blue-50 cursor-pointer ${uploading === 'approved-pi' ? 'opacity-50' : ''}`}>
+                <Upload className="w-4 h-4" />
+                {o.approved_pi_url ? 'Replace Approved PI' : 'Upload Approved PI'}
+                <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
+                  onChange={(e) => e.target.files?.[0] && handleUpload('approved-pi', e.target.files[0])} />
+              </label>
+            )}
+            {/* Salesperson: upload sales bill after approval */}
+            {['approved', 'sent_to_factory', 'dispatched', 'invoiced'].includes(o.status) && (
+              <label className={`flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 cursor-pointer ${uploading === 'sales-bill' ? 'opacity-50' : ''}`}>
+                <Upload className="w-4 h-4" />
+                {o.sales_bill_url ? 'Replace Sales Bill' : 'Upload Sales Bill'}
+                <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
+                  onChange={(e) => e.target.files?.[0] && handleUpload('sales-bill', e.target.files[0])} />
+              </label>
+            )}
             {canRevise && (
-              <button
-                onClick={handleRevise}
-                disabled={revise.isPending}
-                className="px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50"
-              >
+              <button onClick={handleRevise} disabled={revise.isPending} className="px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50">
                 Revise PI
               </button>
             )}
             {['draft', 'sent', 'approved'].includes(o.status) && (
-              <button
-                onClick={handleCancel}
-                className="px-4 py-1.5 border border-red-300 text-red-600 rounded text-sm hover:bg-red-50"
-              >
+              <button onClick={handleCancel} className="px-4 py-1.5 border border-red-300 text-red-600 rounded text-sm hover:bg-red-50">
                 Cancel PI
               </button>
             )}
@@ -143,7 +184,7 @@ export default function OrderDetail() {
         </div>
 
         {/* Status timeline */}
-        <div className="mt-6 flex items-center gap-1">
+        <div className="mt-6 flex items-center gap-1 flex-wrap">
           {STATUS_FLOW.map((s, i) => {
             const idx = STATUS_FLOW.indexOf(o.status);
             const done = i < idx;
@@ -154,7 +195,7 @@ export default function OrderDetail() {
                   active ? 'bg-blue-600 text-white' : done ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-400'
                 }`}>
                   {done && <CheckCircle className="w-3 h-3" />}
-                  {s}
+                  {STATUS_LABELS[s] ?? s}
                 </div>
                 {i < STATUS_FLOW.length - 1 && (
                   <div className={`w-6 h-0.5 ${i < idx ? 'bg-green-300' : 'bg-gray-200'}`} />
@@ -174,7 +215,7 @@ export default function OrderDetail() {
               ['GSTIN', o.buyer_gstin],
               ['Address', o.buyer_address],
               ['PO #', o.buyer_po_number],
-              ['PO Date', o.buyer_order_date],
+              ['PO Date', o.buyer_order_date ? String(o.buyer_order_date).slice(0, 10) : null],
             ]} />
             <KVSection title="Ship To (Consignee)" items={[
               ['Party', o.consignee_name],
@@ -239,6 +280,39 @@ export default function OrderDetail() {
               </tbody>
             </table>
           </div>
+
+          {/* Documents */}
+          {(o.proforma_url || o.approved_pi_url || o.sales_bill_url || o.po_copy_url) && (
+            <div className="bg-white border border-gray-200 rounded-lg p-4">
+              <h3 className="font-semibold text-gray-700 text-sm mb-3">Documents</h3>
+              <div className="flex flex-wrap gap-3">
+                {o.proforma_url && (
+                  <a href={o.proforma_url} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded text-sm text-blue-600 hover:bg-blue-50">
+                    <FileText className="w-4 h-4" /> Pro Forma Invoice <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+                {o.po_copy_url && (
+                  <a href={o.po_copy_url} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded text-sm text-blue-600 hover:bg-blue-50">
+                    <FileText className="w-4 h-4" /> PO Copy <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+                {o.approved_pi_url && (
+                  <a href={o.approved_pi_url} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded text-sm text-green-600 hover:bg-green-50">
+                    <FileText className="w-4 h-4" /> Approved PI <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+                {o.sales_bill_url && (
+                  <a href={o.sales_bill_url} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded text-sm text-orange-600 hover:bg-orange-50">
+                    <FileText className="w-4 h-4" /> Sales Bill <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Right column */}
@@ -272,10 +346,7 @@ export default function OrderDetail() {
                 <span className="text-gray-500">Max Overdue</span>
                 <OverdueBadge days={buyerOutstanding.data.max_overdue_days} />
               </div>
-              <Link
-                to={`/finance/outstanding?customerId=${o.buyer_id}`}
-                className="text-xs text-blue-600 underline block mt-1"
-              >
+              <Link to={`/finance/outstanding?customerId=${o.buyer_id}`} className="text-xs text-blue-600 underline block mt-1">
                 View full outstanding →
               </Link>
             </div>

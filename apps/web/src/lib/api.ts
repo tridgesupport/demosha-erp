@@ -34,9 +34,14 @@ function buildParams(filters?: GlobalFilters, extra?: Record<string, string | nu
   return str ? `?${str}` : '';
 }
 
+function getAuthHeader(): Record<string, string> {
+  const token = localStorage.getItem('token');
+  return token ? { Authorization: `Bearer ${token}` } : {};
+}
+
 async function request<T = any>(path: string, options?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`, {
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
+    headers: { 'Content-Type': 'application/json', ...getAuthHeader(), ...options?.headers },
     ...options,
   });
   if (!res.ok) {
@@ -138,6 +143,24 @@ export const acknowledgeAlert = (id: string, acknowledgedBy: string) =>
     method: 'PATCH',
     body: JSON.stringify({ is_acknowledged: true, acknowledged_by: acknowledgedBy }),
   });
+
+// Document uploads
+export const uploadProforma = (orderId: string, file: File) => {
+  const fd = new FormData(); fd.append('file', file);
+  return fetch(`${BASE_URL}/api/orders/${orderId}/upload-proforma`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
+};
+export const uploadApprovedPi = (orderId: string, file: File) => {
+  const fd = new FormData(); fd.append('file', file);
+  return fetch(`${BASE_URL}/api/orders/${orderId}/upload-approved-pi`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
+};
+export const uploadSalesBill = (orderId: string, file: File) => {
+  const fd = new FormData(); fd.append('file', file);
+  return fetch(`${BASE_URL}/api/orders/${orderId}/upload-sales-bill`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
+};
+export const uploadSignature = (userId: string, file: File) => {
+  const fd = new FormData(); fd.append('file', file);
+  return fetch(`${BASE_URL}/api/auth/users/${userId}/signature`, { method: 'PATCH', headers: getAuthHeader(), body: fd }).then(r => r.json());
+};
 
 export const syncTallyFile = (file: File) => {
   const form = new FormData();

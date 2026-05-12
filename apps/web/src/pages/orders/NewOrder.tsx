@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { fetchFinancialYears, fetchNextPiNumber, fetchAgents, fetchCustomers, fetchVariants as fetchVariantsApi } from '@/lib/api';
+import CustomerFormModal from '@/components/CustomerFormModal';
 import { useCreateOrder } from '@/hooks/useOrders';
 import { useProducts, useVariants } from '@/hooks/useCatalog';
 import { useStates } from '@/hooks/useCatalog';
@@ -41,6 +42,7 @@ export default function NewOrder() {
   const [consigneeStateCode, setConsigneeStateCode] = useState<number | null>(null);
   const [agentId, setAgentId] = useState('');
   const [paymentTermsDays, setPaymentTermsDays] = useState<number | ''>('');
+  const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
   const [freightDesc, setFreightDesc] = useState('');
   const [freightPerKg, setFreightPerKg] = useState(0);
   const [insurancePct, setInsurancePct] = useState(0.5);
@@ -83,7 +85,18 @@ export default function NewOrder() {
       setBuyerGstin(c.gstin ?? '');
       setBuyerStateCode(c.primary_state_code ?? null);
       if (c.payment_terms_days != null) setPaymentTermsDays(c.payment_terms_days);
-      if (sameAsbuyer) setGstType(determineGstType(c.primary_state_code));
+      // Auto-fill consignee from customer's stored consignee data
+      if (c.consignee_name || c.consignee_address) {
+        setSameAsBuyer(false);
+        setConsigneeId(id);
+        setConsigneeAddress(c.consignee_address ?? '');
+        setConsigneeGstin(c.consignee_gstin ?? '');
+        setConsigneeStateCode(c.consignee_state_code ?? null);
+        setGstType(determineGstType(c.consignee_state_code ?? c.primary_state_code));
+      } else {
+        setSameAsBuyer(true);
+        if (sameAsbuyer) setGstType(determineGstType(c.primary_state_code));
+      }
     }
   };
 
@@ -199,11 +212,29 @@ export default function NewOrder() {
           <Section title="Bill To (Buyer)">
             <div className="grid grid-cols-2 gap-4">
               <Field label="Party Name" className="col-span-2">
-                <select className="input" value={buyerId} onChange={(e) => handleBuyerSelect(e.target.value)}>
-                  <option value="">Select customer…</option>
-                  {customers.map((c) => <option key={c.customer_id} value={c.customer_id}>{c.party_name}</option>)}
-                </select>
+                <div className="flex gap-2">
+                  <select className="input flex-1" value={buyerId} onChange={(e) => handleBuyerSelect(e.target.value)}>
+                    <option value="">Select customer…</option>
+                    {customers.map((c) => <option key={c.customer_id} value={c.customer_id}>{c.party_name}</option>)}
+                  </select>
+                  <button
+                    type="button"
+                    onClick={() => setShowNewCustomerModal(true)}
+                    className="px-3 py-1.5 border border-blue-300 text-blue-600 rounded text-sm hover:bg-blue-50 whitespace-nowrap"
+                  >
+                    + New
+                  </button>
+                </div>
               </Field>
+              {showNewCustomerModal && (
+                <CustomerFormModal
+                  onClose={() => setShowNewCustomerModal(false)}
+                  onCreated={(c) => {
+                    setShowNewCustomerModal(false);
+                    handleBuyerSelect(c.customer_id);
+                  }}
+                />
+              )}
               {buyerId && <OutstandingWarningBanner customerId={buyerId} />}
               <Field label="GSTIN">
                 <input className="input" value={buyerGstin} onChange={(e) => setBuyerGstin(e.target.value)} />

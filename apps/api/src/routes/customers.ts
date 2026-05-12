@@ -54,17 +54,21 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
 
 router.post('/', async (req: Request, res: Response) => {
   const { party_name, gstin, primary_state_code, primary_address,
-          contact_phone, contact_email, tally_ref, notes, payment_terms_days } = req.body;
+          contact_phone, contact_email, tally_ref, notes, payment_terms_days,
+          consignee_name, consignee_address, consignee_gstin, consignee_state_code } = req.body;
   try {
     const rows = await sql`
       INSERT INTO customers
         (party_name, gstin, primary_state_code, primary_address,
-         contact_phone, contact_email, tally_ref, notes, is_active, payment_terms_days)
+         contact_phone, contact_email, tally_ref, notes, is_active, payment_terms_days,
+         consignee_name, consignee_address, consignee_gstin, consignee_state_code)
       VALUES
         (${party_name}, ${gstin ?? null}, ${primary_state_code ?? null},
          ${primary_address ?? null}, ${contact_phone ?? null},
          ${contact_email ?? null}, ${tally_ref ?? null}, ${notes ?? null}, true,
-         ${payment_terms_days != null ? parseInt(String(payment_terms_days), 10) : null})
+         ${payment_terms_days != null ? parseInt(String(payment_terms_days), 10) : null},
+         ${consignee_name ?? null}, ${consignee_address ?? null},
+         ${consignee_gstin ?? null}, ${consignee_state_code ?? null})
       RETURNING *
     `;
     res.status(201).json(rows[0]);
@@ -112,21 +116,26 @@ router.get('/:id', async (req: Request, res: Response) => {
 router.put('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { party_name, gstin, primary_state_code, primary_address,
-          contact_phone, contact_email, tally_ref, notes, is_active, payment_terms_days } = req.body;
+          contact_phone, contact_email, tally_ref, notes, is_active, payment_terms_days,
+          consignee_name, consignee_address, consignee_gstin, consignee_state_code } = req.body;
   try {
     const rows = await sql`
       UPDATE customers SET
-        party_name          = ${party_name},
-        gstin               = ${gstin ?? null},
-        primary_state_code  = ${primary_state_code ?? null},
-        primary_address     = ${primary_address ?? null},
-        contact_phone       = ${contact_phone ?? null},
-        contact_email       = ${contact_email ?? null},
-        tally_ref           = ${tally_ref ?? null},
-        notes               = ${notes ?? null},
-        is_active           = ${is_active ?? true},
-        payment_terms_days  = ${payment_terms_days != null ? parseInt(String(payment_terms_days), 10) : null},
-        updated_at          = NOW()
+        party_name           = ${party_name},
+        gstin                = ${gstin ?? null},
+        primary_state_code   = ${primary_state_code ?? null},
+        primary_address      = ${primary_address ?? null},
+        contact_phone        = ${contact_phone ?? null},
+        contact_email        = ${contact_email ?? null},
+        tally_ref            = ${tally_ref ?? null},
+        notes                = ${notes ?? null},
+        is_active            = ${is_active ?? true},
+        payment_terms_days   = ${payment_terms_days != null ? parseInt(String(payment_terms_days), 10) : null},
+        consignee_name       = ${consignee_name ?? null},
+        consignee_address    = ${consignee_address ?? null},
+        consignee_gstin      = ${consignee_gstin ?? null},
+        consignee_state_code = ${consignee_state_code ?? null},
+        updated_at           = NOW()
       WHERE customer_id = ${id} AND deleted_at IS NULL
       RETURNING *
     `;

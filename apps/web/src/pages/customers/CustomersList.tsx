@@ -4,12 +4,14 @@ import { useFiltersContext } from '@/context/FiltersContext';
 import { useCustomers } from '@/hooks/useCustomers';
 import { formatINR } from '@/lib/calculations';
 import OverdueBadge from '@/components/OverdueBadge';
+import CustomerFormModal from '@/components/CustomerFormModal';
 
 export default function CustomersList() {
   const { filters } = useFiltersContext();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
+  const [showModal, setShowModal] = useState(false);
 
   const { data, isLoading } = useCustomers(filters, undefined, page);
   const rows: any[] = data?.data ?? [];
@@ -30,7 +32,20 @@ export default function CustomersList() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Customers</h1>
+        <button
+          onClick={() => setShowModal(true)}
+          className="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700"
+        >
+          + Add Customer
+        </button>
       </div>
+
+      {showModal && (
+        <CustomerFormModal
+          onClose={() => setShowModal(false)}
+          onCreated={(c) => { setShowModal(false); navigate(`/customers/${c.customer_id}`); }}
+        />
+      )}
 
       <input
         type="text"

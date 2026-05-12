@@ -65,54 +65,83 @@ export default function CustomerDetail() {
               )}
             </div>
             {editing ? (
-              <div className="grid grid-cols-2 gap-3 text-sm">
-                {(['party_name', 'gstin', 'contact_phone', 'contact_email', 'tally_ref'] as const).map((field) => (
-                  <div key={field}>
-                    <label className="text-xs text-gray-400 capitalize">{field.replace(/_/g, ' ')}</label>
-                    <input
-                      className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm"
-                      value={form[field] ?? ''}
-                      onChange={(e) => setForm({ ...form, [field]: e.target.value })}
-                    />
-                  </div>
-                ))}
+              <div className="space-y-4">
                 <div>
-                  <label className="text-xs text-gray-400">Payment Terms (Days)</label>
-                  <input
-                    type="number"
-                    min={0}
-                    step={1}
-                    className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm"
-                    value={form.payment_terms_days ?? ''}
-                    onChange={(e) => setForm({ ...form, payment_terms_days: e.target.value === '' ? null : parseInt(e.target.value, 10) })}
-                  />
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Bill To (Buyer)</p>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    {(['party_name', 'gstin'] as const).map((field) => (
+                      <div key={field}>
+                        <label className="text-xs text-gray-400">{field === 'party_name' ? 'Buyer Name' : 'Buyer GSTIN'}</label>
+                        <input className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm" value={form[field] ?? ''} onChange={(e) => setForm({ ...form, [field]: e.target.value })} />
+                      </div>
+                    ))}
+                    <div>
+                      <label className="text-xs text-gray-400">Payment Terms (Days)</label>
+                      <input type="number" min={0} step={1} className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm" value={form.payment_terms_days ?? ''} onChange={(e) => setForm({ ...form, payment_terms_days: e.target.value === '' ? null : parseInt(e.target.value, 10) })} />
+                    </div>
+                    {(['contact_phone', 'contact_email', 'tally_ref'] as const).map((field) => (
+                      <div key={field}>
+                        <label className="text-xs text-gray-400 capitalize">{field.replace(/_/g, ' ')}</label>
+                        <input className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm" value={form[field] ?? ''} onChange={(e) => setForm({ ...form, [field]: e.target.value })} />
+                      </div>
+                    ))}
+                    <div className="col-span-2">
+                      <label className="text-xs text-gray-400">Buyer Address</label>
+                      <textarea className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm" rows={2} value={form.primary_address ?? ''} onChange={(e) => setForm({ ...form, primary_address: e.target.value })} />
+                    </div>
+                  </div>
                 </div>
-                <div className="col-span-2">
+                <div>
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Ship To (Consignee)</p>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div className="col-span-2">
+                      <label className="text-xs text-gray-400">Consignee Name</label>
+                      <input className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm" value={form.consignee_name ?? ''} onChange={(e) => setForm({ ...form, consignee_name: e.target.value })} />
+                    </div>
+                    <div>
+                      <label className="text-xs text-gray-400">Consignee GSTIN</label>
+                      <input className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm" value={form.consignee_gstin ?? ''} onChange={(e) => setForm({ ...form, consignee_gstin: e.target.value })} />
+                    </div>
+                    <div className="col-span-2">
+                      <label className="text-xs text-gray-400">Consignee Address</label>
+                      <textarea className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm" rows={2} value={form.consignee_address ?? ''} onChange={(e) => setForm({ ...form, consignee_address: e.target.value })} />
+                    </div>
+                  </div>
+                </div>
+                <div>
                   <label className="text-xs text-gray-400">Notes</label>
-                  <textarea
-                    className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm"
-                    rows={2}
-                    value={form.notes ?? ''}
-                    onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                  />
+                  <textarea className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm" rows={2} value={form.notes ?? ''} onChange={(e) => setForm({ ...form, notes: e.target.value })} />
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                {[
-                  ['GSTIN', c.gstin],
-                  ['State', c.state_name],
-                  ['Phone', c.contact_phone],
-                  ['Email', c.contact_email],
-                  ['Tally Ref', c.tally_ref],
-                  ['Payment Terms', c.payment_terms_days != null ? `${c.payment_terms_days} Days` : null],
-                ].map(([k, v]) => v ? (
-                  <div key={k}><span className="text-gray-400">{k}: </span><span className="font-medium">{v}</span></div>
-                ) : null)}
-                {c.primary_address && (
-                  <div className="col-span-2 text-gray-600 text-xs">{c.primary_address}</div>
+              <div className="space-y-3 text-sm">
+                <div>
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Buyer</p>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      ['GSTIN', c.gstin],
+                      ['State', c.state_name],
+                      ['Phone', c.contact_phone],
+                      ['Email', c.contact_email],
+                      ['Tally Ref', c.tally_ref],
+                      ['Payment Terms', c.payment_terms_days != null ? `${c.payment_terms_days} Days` : null],
+                    ].map(([k, v]) => v ? (
+                      <div key={k}><span className="text-gray-400">{k}: </span><span className="font-medium">{v}</span></div>
+                    ) : null)}
+                    {c.primary_address && <div className="col-span-2 text-gray-600 text-xs">{c.primary_address}</div>}
+                  </div>
+                </div>
+                {(c.consignee_name || c.consignee_address) && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-1">Consignee</p>
+                    <div className="grid grid-cols-2 gap-2">
+                      {c.consignee_name && <div className="col-span-2 font-medium">{c.consignee_name}</div>}
+                      {c.consignee_gstin && <div><span className="text-gray-400">GSTIN: </span><span className="font-medium">{c.consignee_gstin}</span></div>}
+                      {c.consignee_address && <div className="col-span-2 text-gray-600 text-xs">{c.consignee_address}</div>}
+                    </div>
+                  </div>
                 )}
-                {c.notes && <div className="col-span-2 text-xs text-gray-500 bg-gray-50 p-2 rounded">{c.notes}</div>}
+                {c.notes && <div className="text-xs text-gray-500 bg-gray-50 p-2 rounded">{c.notes}</div>}
               </div>
             )}
           </div>

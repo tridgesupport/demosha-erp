@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { fetchFinancialYears, fetchNextPiNumber, fetchAgents, fetchCustomers, fetchPaymentTermsSuggestions, fetchVariants as fetchVariantsApi } from '@/lib/api';
+import { fetchFinancialYears, fetchNextPiNumber, fetchAgents, fetchCustomers, fetchVariants as fetchVariantsApi } from '@/lib/api';
 import { useCreateOrder } from '@/hooks/useOrders';
 import { useProducts, useVariants } from '@/hooks/useCatalog';
 import { useStates } from '@/hooks/useCatalog';
@@ -19,7 +19,6 @@ export default function NewOrder() {
   const { data: fyList = [] } = useQuery({ queryKey: ['financial-years'], queryFn: fetchFinancialYears });
   const { data: agents = [] } = useQuery({ queryKey: ['agents'], queryFn: fetchAgents });
   const { data: customerRes } = useQuery({ queryKey: ['customers-filter'], queryFn: () => fetchCustomers(undefined, undefined, 1, 500) });
-  const { data: paymentSuggestions = [] } = useQuery({ queryKey: ['payment-terms-suggestions'], queryFn: fetchPaymentTermsSuggestions });
   const { data: states = [] } = useStates();
   const { data: products = [] } = useProducts();
 
@@ -41,7 +40,7 @@ export default function NewOrder() {
   const [consigneeGstin, setConsigneeGstin] = useState('');
   const [consigneeStateCode, setConsigneeStateCode] = useState<number | null>(null);
   const [agentId, setAgentId] = useState('');
-  const [paymentTerms, setPaymentTerms] = useState('');
+  const [paymentTermsDays, setPaymentTermsDays] = useState<number | ''>('');
   const [freightDesc, setFreightDesc] = useState('');
   const [freightPerKg, setFreightPerKg] = useState(0);
   const [insurancePct, setInsurancePct] = useState(0.5);
@@ -83,6 +82,7 @@ export default function NewOrder() {
       setBuyerAddress(c.primary_address ?? '');
       setBuyerGstin(c.gstin ?? '');
       setBuyerStateCode(c.primary_state_code ?? null);
+      if (c.payment_terms_days != null) setPaymentTermsDays(c.payment_terms_days);
       if (sameAsbuyer) setGstType(determineGstType(c.primary_state_code));
     }
   };
@@ -104,11 +104,10 @@ export default function NewOrder() {
   const totals = calcOrderTotals(header, lines);
 
   const handleSubmit = async (status: 'draft' | 'sent') => {
-    const enrichedLines = lines.map((l) => ({
-      ...l,
-      num_packages: calcNumPackages(l.qty_kg, l.qty_per_pkg),
-      line_amount: calcLineAmount(l.qty_kg, l.rate_per_mt),
-    }));
+    const enrichedLines = lines.map((l) => {
+      const num_packages = calcNumPackages(l.qty_kg, l.qty_per_pkg);
+      return { ...l, num_packages, line_amount: calcLineAmount(num_packages, l.rate_per_mt) };
+    });
 
     let poCopyUrl: string | null = null;
     if (poCopyFile) {
@@ -137,7 +136,7 @@ export default function NewOrder() {
       consignee_gstin: sameAsbuyer ? buyerGstin : consigneeGstin,
       consignee_state_code: sameAsbuyer ? buyerStateCode : consigneeStateCode,
       agent_id: agentId || null,
-      payment_terms: paymentTerms || null,
+      payment_terms_days: paymentTermsDays !== '' ? paymentTermsDays : null,
       freight_desc: freightDesc || null,
       freight_per_kg: freightPerKg,
       insurance_pct: insurancePct,
@@ -222,8 +221,8 @@ export default function NewOrder() {
               <Field label="Address" className="col-span-2">
                 <textarea className="input" rows={2} value={buyerAddress} onChange={(e) => setBuyerAddress(e.target.value)} />
               </Field>
-              <Field label="Buyer PO Number">
-                <input className="input" value={buyerPoNumber} onChange={(e) => setBuyerPoNumber(e.target.value)} />
+              <Field label="Buyer PO Number *">
+                <input className="input" value={buyerPoNumber} required onChange={(e) => setBuyerPoNumber(e.target.value)} />
               </Field>
               <Field label="Buyer PO Date">
                 <input type="date" className="input" value={buyerOrderDate} onChange={(e) => setBuyerOrderDate(e.target.value)} />
@@ -283,16 +282,16 @@ export default function NewOrder() {
                   {(agents as any[]).map((a: any) => <option key={a.agent_id} value={a.agent_id}>{a.agent_name}</option>)}
                 </select>
               </Field>
-              <Field label="Payment Terms">
+              <Field label="Payment Terms (Days)">
                 <input
-                  list="payment-terms-list"
+                  type="number"
+                  min={0}
+                  step={1}
                   className="input"
-                  value={paymentTerms}
-                  onChange={(e) => setPaymentTerms(e.target.value)}
+                  placeholder="e.g. 30"
+                  value={paymentTermsDays}
+                  onChange={(e) => setPaymentTermsDays(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
                 />
-                <datalist id="payment-terms-list">
-                  {(paymentSuggestions as string[]).map((s) => <option key={s} value={s} />)}
-                </datalist>
               </Field>
               <Field label="Freight Description">
                 <input
@@ -336,7 +335,7 @@ export default function NewOrder() {
             <button
               type="button"
               onClick={() => handleSubmit('draft')}
-              disabled={!buyerId || createOrder.isPending}
+              disabled={!buyerId || !buyerPoNumber || createOrder.isPending}
               className="px-5 py-2 border border-gray-300 rounded text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
             >
               Save Draft
@@ -344,7 +343,7 @@ export default function NewOrder() {
             <button
               type="button"
               onClick={() => handleSubmit('sent')}
-              disabled={!buyerId || lines.length === 0 || createOrder.isPending}
+              disabled={!buyerId || !buyerPoNumber || lines.length === 0 || createOrder.isPending}
               className="px-5 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
             >
               Submit for Approval

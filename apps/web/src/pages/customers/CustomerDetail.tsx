@@ -68,7 +68,7 @@ export default function CustomerDetail() {
               <div className="grid grid-cols-2 gap-3 text-sm">
                 {(['party_name', 'gstin', 'contact_phone', 'contact_email', 'tally_ref'] as const).map((field) => (
                   <div key={field}>
-                    <label className="text-xs text-gray-400 capitalize">{field.replace('_', ' ')}</label>
+                    <label className="text-xs text-gray-400 capitalize">{field.replace(/_/g, ' ')}</label>
                     <input
                       className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm"
                       value={form[field] ?? ''}
@@ -76,6 +76,17 @@ export default function CustomerDetail() {
                     />
                   </div>
                 ))}
+                <div>
+                  <label className="text-xs text-gray-400">Payment Terms (Days)</label>
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm"
+                    value={form.payment_terms_days ?? ''}
+                    onChange={(e) => setForm({ ...form, payment_terms_days: e.target.value === '' ? null : parseInt(e.target.value, 10) })}
+                  />
+                </div>
                 <div className="col-span-2">
                   <label className="text-xs text-gray-400">Notes</label>
                   <textarea
@@ -94,6 +105,7 @@ export default function CustomerDetail() {
                   ['Phone', c.contact_phone],
                   ['Email', c.contact_email],
                   ['Tally Ref', c.tally_ref],
+                  ['Payment Terms', c.payment_terms_days != null ? `${c.payment_terms_days} Days` : null],
                 ].map(([k, v]) => v ? (
                   <div key={k}><span className="text-gray-400">{k}: </span><span className="font-medium">{v}</span></div>
                 ) : null)}

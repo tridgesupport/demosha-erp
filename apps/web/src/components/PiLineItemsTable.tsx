@@ -50,7 +50,7 @@ export default function PiLineItemsTable({ lines, variants, onChange }: Props) {
         }
       }
       next.num_packages = calcNumPackages(next.qty_kg, next.qty_per_pkg);
-      next.line_amount = calcLineAmount(next.qty_kg, next.rate_per_mt);
+      next.line_amount = calcLineAmount(next.num_packages, next.rate_per_mt);
       return next;
     });
     onChange(updated);
@@ -66,8 +66,8 @@ export default function PiLineItemsTable({ lines, variants, onChange }: Props) {
               <th className="py-2 text-left">SKU / Description</th>
               <th className="py-2 text-right w-24">Qty (kg)</th>
               <th className="py-2 text-right w-20">Pkgs</th>
-              <th className="py-2 text-right w-28">Rate (INR/MT)</th>
-              <th className="py-2 text-right w-28">Amount (INR)</th>
+              <th className="py-2 text-right w-28">Rate (₹/Pkg)</th>
+              <th className="py-2 text-right w-28">Amount (₹)</th>
               <th className="py-2 w-8"></th>
             </tr>
           </thead>
@@ -113,7 +113,7 @@ export default function PiLineItemsTable({ lines, variants, onChange }: Props) {
                   />
                 </td>
                 <td className="py-2 pr-2 text-right font-medium">
-                  {formatINR(calcLineAmount(line.qty_kg, line.rate_per_mt))}
+                  {formatINR(calcLineAmount(calcNumPackages(line.qty_kg, line.qty_per_pkg), line.rate_per_mt))}
                 </td>
                 <td className="py-2">
                   <button

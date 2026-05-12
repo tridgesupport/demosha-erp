@@ -25,8 +25,8 @@ export interface OrderTotals {
   total_amount: number;
 }
 
-export function calcLineAmount(qty_kg: number, rate_per_mt: number): number {
-  return (qty_kg / 1000) * rate_per_mt;
+export function calcLineAmount(num_packages: number, rate_per_mt: number): number {
+  return num_packages * rate_per_mt;
 }
 
 export function calcNumPackages(qty_kg: number, qty_per_pkg: number | null | undefined): number {
@@ -35,7 +35,7 @@ export function calcNumPackages(qty_kg: number, qty_per_pkg: number | null | und
 }
 
 export function calcOrderTotals(header: OrderHeader, lines: OrderLine[]): OrderTotals {
-  const gross_value = lines.reduce((sum, l) => sum + calcLineAmount(l.qty_kg, l.rate_per_mt), 0);
+  const gross_value = lines.reduce((sum, l) => sum + calcLineAmount(calcNumPackages(l.qty_kg, l.qty_per_pkg), l.rate_per_mt), 0);
   const insurance_amount = gross_value * (header.insurance_pct / 100);
   const freight_amount = gross_value * (header.freight_per_kg / 1000);
   const assessable_value = gross_value + insurance_amount + freight_amount;

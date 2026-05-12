@@ -92,7 +92,7 @@ export default function ProformaInvoice({ order: o }: Props) {
         <tbody>
           <tr>
             <td style={{ width: '50%', border: '1px solid black', padding: '3px 5px' }}>
-              <strong>PAYMENT TERMS:</strong> {o.payment_terms ?? '—'}
+              <strong>PAYMENT TERMS:</strong> {o.payment_terms_days != null ? `${o.payment_terms_days} Days` : (o.payment_terms ?? '—')}
             </td>
             <td style={{ width: '50%', border: '1px solid black', padding: '3px 5px' }}>
               <strong>AGENT'S NAME:</strong> {o.agent_name ?? '—'}
@@ -109,7 +109,7 @@ export default function ProformaInvoice({ order: o }: Props) {
             <th style={{ border: '1px solid black', padding: '3px 4px', textAlign: 'left', width: '45%' }}>DESCRIPTION</th>
             <th style={{ border: '1px solid black', padding: '3px 4px', textAlign: 'center', width: '10%' }}>NO. OF PKG</th>
             <th style={{ border: '1px solid black', padding: '3px 4px', textAlign: 'center', width: '12%' }}>QTY (KGS)</th>
-            <th style={{ border: '1px solid black', padding: '3px 4px', textAlign: 'center', width: '14%' }}>RATE (₹ PER MT)</th>
+            <th style={{ border: '1px solid black', padding: '3px 4px', textAlign: 'center', width: '14%' }}>RATE (₹/PKG)</th>
             <th style={{ border: '1px solid black', padding: '3px 4px', textAlign: 'right', width: '14%' }}>AMOUNT (₹)</th>
           </tr>
         </thead>

@@ -158,7 +158,12 @@ router.post('/', async (req: Request, res: Response) => {
     res.status(201).json({ ...order, pi_number });
   } catch (err: any) {
     console.error(err);
-    res.status(500).json({ error: err?.message ?? 'Failed to create order' });
+    let msg = err?.message ?? 'Failed to create order';
+    if (msg.includes('numeric field overflow')) msg = 'A numeric value is too large for its field (check GST rate, TCS rate, insurance %, or freight rate).';
+    else if (msg.includes('invalid input syntax for type uuid')) msg = 'A line item has no SKU selected — please select a product for every row.';
+    else if (msg.includes('violates not-null')) msg = 'A required field is missing.';
+    else if (msg.includes('violates foreign key')) msg = 'Invalid reference — the selected customer or product may not exist.';
+    res.status(500).json({ error: msg });
   }
 });
 

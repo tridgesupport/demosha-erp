@@ -2,9 +2,13 @@ import { formatINR } from '@/lib/calculations';
 
 interface Props {
   order: any;
+  approverName?: string | null;
+  approverSignatureUrl?: string | null;
 }
 
-export default function ProformaInvoice({ order: o }: Props) {
+export default function ProformaInvoice({ order: o, approverName, approverSignatureUrl }: Props) {
+  const resolvedApproverName = approverName !== undefined ? approverName : o.approver_name;
+  const resolvedApproverSig  = approverSignatureUrl !== undefined ? approverSignatureUrl : o.approver_signature_url;
   const formatDate = (d: string | null) => {
     if (!d) return '—';
     return String(d).slice(0, 10).split('-').reverse().join('/');
@@ -195,12 +199,12 @@ export default function ProformaInvoice({ order: o }: Props) {
             <td style={{ width: '40%', border: '1px solid black', padding: '6px 8px', textAlign: 'center' }}>
               <p style={{ margin: 0 }}>For <strong>DEMOSHA CHEMICALS PVT LTD</strong></p>
               <div style={{ height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {o.approver_signature_url && (
-                  <img src={o.approver_signature_url} alt="Signature" style={{ maxHeight: 44, maxWidth: '80%', objectFit: 'contain' }} />
+                {resolvedApproverSig && (
+                  <img src={resolvedApproverSig} alt="Signature" crossOrigin="anonymous" style={{ maxHeight: 44, maxWidth: '80%', objectFit: 'contain' }} />
                 )}
               </div>
               <p style={{ margin: 0, borderTop: '1px solid black', paddingTop: 4 }}>
-                {o.approver_name ? `${o.approver_name} — ` : ''}Authorised Signatory
+                {resolvedApproverName ? `${resolvedApproverName} — ` : ''}Authorised Signatory
               </p>
             </td>
           </tr>

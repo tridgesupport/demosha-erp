@@ -7,8 +7,10 @@ import OverdueBadge from '@/components/OverdueBadge';
 import ProformaInvoice from '@/components/ProformaInvoice';
 import { useCustomerOutstanding } from '@/hooks/useCustomers';
 import { useAuth } from '@/context/AuthContext';
-import { uploadApprovedPi, uploadSalesBill } from '@/lib/api';
+import { uploadSalesBill } from '@/lib/api';
 import { useQueryClient } from '@tanstack/react-query';
+import html2canvas from 'html2canvas';
+import { jsPDF } from 'jspdf';
 import { ArrowLeft, CheckCircle, Printer, Upload, FileText, ExternalLink } from 'lucide-react';
 
 const STATUS_FLOW = ['draft', 'sent', 'approved', 'sent_to_factory', 'invoiced', 'dispatched'];
@@ -29,9 +31,11 @@ export default function OrderDetail() {
   const revise = useReviseOrder(id!);
   const [confirming, setConfirming] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
 
   const buyerOutstanding = useCustomerOutstanding(order?.buyer_id);
   const printRef = useRef<HTMLDivElement>(null);
+  const approvalRef = useRef<HTMLDivElement>(null);
 
   const handlePrint = () => {
     const content = printRef.current?.innerHTML;
@@ -51,11 +55,40 @@ export default function OrderDetail() {
     setTimeout(() => { win.print(); }, 400);
   };
 
-  const handleUpload = async (type: 'approved-pi' | 'sales-bill', file: File) => {
-    setUploading(type);
+  const generateAndUploadApprovedPdf = async () => {
+    const el = approvalRef.current;
+    if (!el) return;
+    setGeneratingPdf(true);
     try {
-      if (type === 'approved-pi') await uploadApprovedPi(id!, file);
-      else await uploadSalesBill(id!, file);
+      el.style.display = 'block';
+      const canvas = await html2canvas(el, { scale: 2, useCORS: true, allowTaint: false, logging: false });
+      el.style.display = 'none';
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const imgData = canvas.toDataURL('image/jpeg', 0.92);
+      const imgW = 210;
+      const imgH = (canvas.height * imgW) / canvas.width;
+      pdf.addImage(imgData, 'JPEG', 0, 0, imgW, imgH);
+      const blob = pdf.output('blob');
+      const fd = new FormData();
+      fd.append('file', blob, `approved_pi_${id}.pdf`);
+      const token = localStorage.getItem('token');
+      await fetch(`${import.meta.env.VITE_API_URL ?? ''}/api/orders/${id}/upload-approved-pi`, {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: fd,
+      });
+      queryClient.invalidateQueries({ queryKey: ['order', id] });
+    } catch (err) {
+      console.error('Failed to generate approved PI PDF:', err);
+    } finally {
+      setGeneratingPdf(false);
+    }
+  };
+
+  const handleUpload = async (file: File) => {
+    setUploading('sales-bill');
+    try {
+      await uploadSalesBill(id!, file);
       queryClient.invalidateQueries({ queryKey: ['order', id] });
     } finally {
       setUploading(null);
@@ -85,6 +118,7 @@ export default function OrderDetail() {
 
   const handleStatusChange = async () => {
     if (!nextAction) return;
+    if (nextAction.next === 'approved') await generateAndUploadApprovedPdf();
     await updateStatus.mutateAsync(nextAction.next);
     setConfirming(false);
   };
@@ -150,32 +184,22 @@ export default function OrderDetail() {
             <button onClick={handlePrint} className="flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50">
               <Printer className="w-4 h-4" /> Print Pro Forma
             </button>
-            {nextAction && o.status !== 'cancelled' && (
-              <button
-                onClick={confirming ? handleStatusChange : () => setConfirming(true)}
-                disabled={updateStatus.isPending}
-                className="px-4 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
-              >
-                {confirming ? `Confirm: ${nextAction.label}` : nextAction.label}
-              </button>
-            )}
-            {/* Manager: upload approved PI */}
-            {isManagerOrAdmin && ['sent', 'approved', 'sent_to_factory', 'dispatched', 'invoiced'].includes(o.status) && (
-              <label className={`flex items-center gap-1.5 px-4 py-1.5 border border-blue-300 text-blue-700 rounded text-sm hover:bg-blue-50 cursor-pointer ${uploading === 'approved-pi' ? 'opacity-50' : ''}`}>
-                <Upload className="w-4 h-4" />
-                {o.approved_pi_url ? 'Replace Approved PI' : 'Upload Approved PI'}
-                <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
-                  onChange={(e) => e.target.files?.[0] && handleUpload('approved-pi', e.target.files[0])} />
-              </label>
-            )}
-            {/* Salesperson: upload sales bill after approval */}
-            {['approved', 'sent_to_factory', 'dispatched', 'invoiced'].includes(o.status) && (
+            {['approved', 'sent_to_factory', 'invoiced', 'dispatched'].includes(o.status) && (
               <label className={`flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 cursor-pointer ${uploading === 'sales-bill' ? 'opacity-50' : ''}`}>
                 <Upload className="w-4 h-4" />
                 {o.sales_bill_url ? 'Replace Sales Bill' : 'Upload Sales Bill'}
                 <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
-                  onChange={(e) => e.target.files?.[0] && handleUpload('sales-bill', e.target.files[0])} />
+                  onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} />
               </label>
+            )}
+            {nextAction && o.status !== 'cancelled' && (
+              <button
+                onClick={confirming ? handleStatusChange : () => setConfirming(true)}
+                disabled={updateStatus.isPending || generatingPdf}
+                className="px-4 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
+              >
+                {generatingPdf ? 'Generating PDF…' : updateStatus.isPending ? 'Saving…' : confirming ? `Confirm: ${nextAction.label}` : nextAction.label}
+              </button>
             )}
             {canRevise && (
               <button onClick={handleRevise} disabled={revise.isPending} className="px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50">
@@ -289,31 +313,19 @@ export default function OrderDetail() {
           </div>
 
           {/* Documents */}
-          {(o.proforma_url || o.approved_pi_url || o.sales_bill_url || o.po_copy_url) && (
+          {(o.approved_pi_url || o.sales_bill_url) && (
             <div className="bg-white border border-gray-200 rounded-lg p-4">
               <h3 className="font-semibold text-gray-700 text-sm mb-3">Documents</h3>
               <div className="flex flex-wrap gap-3">
-                {o.proforma_url && (
-                  <a href={o.proforma_url} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded text-sm text-blue-600 hover:bg-blue-50">
-                    <FileText className="w-4 h-4" /> Pro Forma Invoice <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
-                {o.po_copy_url && (
-                  <a href={o.po_copy_url} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded text-sm text-blue-600 hover:bg-blue-50">
-                    <FileText className="w-4 h-4" /> PO Copy <ExternalLink className="w-3 h-3" />
-                  </a>
-                )}
                 {o.approved_pi_url && (
                   <a href={o.approved_pi_url} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded text-sm text-green-600 hover:bg-green-50">
-                    <FileText className="w-4 h-4" /> Approved PI <ExternalLink className="w-3 h-3" />
+                    className="flex items-center gap-1.5 px-3 py-1.5 border border-green-200 rounded text-sm text-green-700 hover:bg-green-50">
+                    <FileText className="w-4 h-4" /> Approved Pro Forma <ExternalLink className="w-3 h-3" />
                   </a>
                 )}
                 {o.sales_bill_url && (
                   <a href={o.sales_bill_url} target="_blank" rel="noopener noreferrer"
-                    className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 rounded text-sm text-orange-600 hover:bg-orange-50">
+                    className="flex items-center gap-1.5 px-3 py-1.5 border border-orange-200 rounded text-sm text-orange-700 hover:bg-orange-50">
                     <FileText className="w-4 h-4" /> Sales Bill <ExternalLink className="w-3 h-3" />
                   </a>
                 )}
@@ -364,6 +376,11 @@ export default function OrderDetail() {
       {/* Hidden print content */}
       <div ref={printRef} style={{ display: 'none' }}>
         <ProformaInvoice order={o} />
+      </div>
+
+      {/* Hidden approval PDF content — uses current user's signature */}
+      <div ref={approvalRef} style={{ display: 'none', position: 'absolute', left: '-9999px', top: 0 }}>
+        <ProformaInvoice order={o} approverName={user?.name} approverSignatureUrl={user?.signature_url} />
       </div>
     </div>
   );

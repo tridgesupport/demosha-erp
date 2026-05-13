@@ -389,6 +389,7 @@ function UsersTab() {
   const [error, setError] = useState('');
   const [resetId, setResetId] = useState<string | null>(null);
   const [newPw, setNewPw] = useState('');
+  const [savingRoleId, setSavingRoleId] = useState<string | null>(null);
 
   const { data: users = [] } = useQuery({
     queryKey: ['admin-users'],
@@ -409,6 +410,16 @@ function UsersTab() {
     if (!confirm('Delete this user?')) return;
     await fetch(`${BASE}/api/auth/users/${id}`, { method: 'DELETE', headers: authHeader() });
     qc.invalidateQueries({ queryKey: ['admin-users'] });
+  };
+
+  const changeRole = async (id: string, role: string) => {
+    setSavingRoleId(id);
+    await fetch(`${BASE}/api/auth/users/${id}/role`, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeader() },
+      body: JSON.stringify({ role }),
+    });
+    qc.invalidateQueries({ queryKey: ['admin-users'] });
+    setSavingRoleId(null);
   };
 
   const resetPassword = async (id: string) => {
@@ -437,7 +448,19 @@ function UsersTab() {
               <tr key={u.user_id}>
                 <td className="px-4 py-2 font-medium">{u.name}</td>
                 <td className="px-4 py-2 text-gray-500">{u.email}</td>
-                <td className="px-4 py-2 capitalize">{u.role}</td>
+                <td className="px-4 py-2">
+                  <select
+                    className="border border-gray-200 rounded px-1.5 py-0.5 text-xs bg-white disabled:opacity-50"
+                    value={u.role}
+                    disabled={savingRoleId === u.user_id}
+                    onChange={(e) => changeRole(u.user_id, e.target.value)}
+                  >
+                    <option value="salesperson">Salesperson</option>
+                    <option value="manager">Manager</option>
+                    <option value="factory">Factory</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </td>
                 <td className="px-4 py-2 text-gray-400">{new Date(u.created_at).toLocaleDateString()}</td>
                 <td className="px-4 py-2 text-right">
                   <div className="flex gap-2 justify-end">
@@ -477,6 +500,7 @@ function UsersTab() {
             <select className="input w-full" value={form.role} onChange={(e) => setForm(p => ({ ...p, role: e.target.value }))}>
               <option value="salesperson">Salesperson</option>
               <option value="manager">Manager</option>
+              <option value="factory">Factory</option>
               <option value="admin">Admin</option>
             </select>
           </div>

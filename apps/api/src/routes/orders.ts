@@ -26,6 +26,7 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
           o.consignee_id, c.party_name AS consignee_name,
           o.agent_id,    a.agent_name,
           o.total_amount, o.is_cancelled, o.revision_number,
+          o.status_changed_at,
           fy.fy_label,
           COUNT(ol.line_id)::int AS line_count
         FROM sales_orders o
@@ -316,8 +317,9 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
         submitted_at  = CASE WHEN ${isSubmission} THEN NOW()        ELSE submitted_at END,
         approved_by   = CASE WHEN ${isApproval}   THEN ${userEmail} ELSE approved_by END,
         approved_at   = CASE WHEN ${isApproval}   THEN NOW()        ELSE approved_at END,
-        invoiced_at   = CASE WHEN ${isInvoiced}   THEN NOW()        ELSE invoiced_at END,
-        dispatched_at = CASE WHEN ${isDispatched} THEN NOW()        ELSE dispatched_at END
+        invoiced_at      = CASE WHEN ${isInvoiced}   THEN NOW()        ELSE invoiced_at END,
+        dispatched_at    = CASE WHEN ${isDispatched} THEN NOW()        ELSE dispatched_at END,
+        status_changed_at = NOW()
       WHERE order_id = ${id} AND deleted_at IS NULL
       RETURNING *
     `;

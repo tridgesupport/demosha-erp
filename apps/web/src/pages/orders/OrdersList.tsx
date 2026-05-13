@@ -6,7 +6,7 @@ import { formatINR } from '@/lib/calculations';
 import StatusBadge from '@/components/StatusBadge';
 import { Plus, Download, ChevronUp, ChevronDown } from 'lucide-react';
 
-type SortKey = 'pi_number' | 'order_date' | 'buyer_name' | 'agent_name' | 'total_amount' | 'status';
+type SortKey = 'pi_number' | 'order_date' | 'buyer_name' | 'agent_name' | 'total_amount' | 'status' | 'status_changed_at';
 
 export default function OrdersList() {
   const { filters } = useFiltersContext();
@@ -44,13 +44,15 @@ export default function OrdersList() {
   };
 
   const exportCsv = () => {
-    const headers = ['PI#', 'FY', 'Date', 'Buyer', 'Consignee', 'Agent', 'Total (INR)', 'Status', 'Lines'];
+    const headers = ['PI#', 'FY', 'Date', 'Buyer', 'Consignee', 'Agent', 'Total (INR)', 'Status', 'Updated', 'Lines'];
     const csvRows = [
       headers.join(','),
       ...displayed.map((o) =>
         [
           o.pi_number, o.fy_label, o.order_date, `"${o.buyer_name}"`, `"${o.consignee_name}"`,
-          `"${o.agent_name}"`, o.total_amount, o.status, o.line_count,
+          `"${o.agent_name}"`, o.total_amount, o.status,
+          o.status_changed_at ? new Date(o.status_changed_at).toLocaleString() : '',
+          o.line_count,
         ].join(',')
       ),
     ];
@@ -105,6 +107,7 @@ export default function OrdersList() {
                   ['agent_name', 'Agent'],
                   ['total_amount', 'Total (INR)'],
                   ['status', 'Status'],
+                  ['status_changed_at', 'Updated'],
                 ] as [SortKey, string][]).map(([key, label]) => (
                   <th
                     key={key}
@@ -121,14 +124,14 @@ export default function OrdersList() {
               {isLoading ? (
                 [...Array(10)].map((_, i) => (
                   <tr key={i}>
-                    <td colSpan={8} className="px-4 py-3">
+                    <td colSpan={9} className="px-4 py-3">
                       <div className="h-4 bg-gray-200 rounded animate-pulse" />
                     </td>
                   </tr>
                 ))
               ) : displayed.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
                     No orders found
                   </td>
                 </tr>
@@ -146,6 +149,9 @@ export default function OrdersList() {
                     <td className="px-4 py-2.5 text-gray-600">{o.agent_name ?? '—'}</td>
                     <td className="px-4 py-2.5 text-right font-medium">{formatINR(o.total_amount)}</td>
                     <td className="px-4 py-2.5"><StatusBadge status={o.status} /></td>
+                    <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap">
+                      {o.status_changed_at ? new Date(o.status_changed_at).toLocaleString() : '—'}
+                    </td>
                     <td className="px-4 py-2.5 text-right text-gray-500">{o.line_count}</td>
                   </tr>
                 ))

@@ -92,7 +92,7 @@ router.get('/users', requireAuth, requireRole('admin'), async (_req: Request, re
 router.post('/register', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
   const { email, name, role, password } = req.body;
   if (!email || !name || !role || !password) return res.status(400).json({ error: 'All fields required' });
-  if (!['admin', 'manager', 'salesperson'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  if (!['admin', 'manager', 'salesperson', 'factory'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
   if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
   try {
     const hash = await bcrypt.hash(password, 10);
@@ -116,6 +116,19 @@ router.delete('/users/:id', requireAuth, requireRole('admin'), async (req: Reque
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to delete user' });
+  }
+});
+
+// PATCH /api/auth/users/:id/role  (admin only)
+router.patch('/users/:id/role', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+  const { role } = req.body;
+  if (!['admin', 'manager', 'salesperson', 'factory'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  if (req.params.id === req.user!.user_id) return res.status(400).json({ error: 'Cannot change your own role' });
+  try {
+    await sql`UPDATE users SET role = ${role} WHERE user_id = ${req.params.id} AND deleted_at IS NULL`;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update role' });
   }
 });
 

@@ -96,6 +96,12 @@ export const fetchCustomerOutstanding = (id: string) =>
 export const fetchCustomerOrders = (id: string, filters?: GlobalFilters) =>
   request(`/api/customers/${id}/orders${buildParams(filters)}`);
 
+export const fetchConsignees = (buyerId: string) =>
+  request(`/api/customers/${buyerId}/consignees`);
+
+export const createConsignee = (buyerId: string, body: unknown) =>
+  request(`/api/customers/${buyerId}/consignees`, { method: 'POST', body: JSON.stringify(body) });
+
 // Catalog
 export const fetchProducts = (search?: string) =>
   request(`/api/catalog/products${search ? `?search=${encodeURIComponent(search)}` : ''}`);

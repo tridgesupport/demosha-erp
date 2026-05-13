@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { fetchFinancialYears, fetchNextPiNumber, fetchAgents, fetchCustomers, fetchVariants as fetchVariantsApi } from '@/lib/api';
+import { fetchFinancialYears, fetchNextPiNumber, fetchAgents, fetchCustomers, fetchVariants as fetchVariantsApi, fetchConsignees, createConsignee } from '@/lib/api';
 import CustomerFormModal from '@/components/CustomerFormModal';
 import { useCreateOrder } from '@/hooks/useOrders';
 import { useProducts, useVariants } from '@/hooks/useCatalog';
@@ -36,10 +36,17 @@ export default function NewOrder() {
   const [buyerPoNumber, setBuyerPoNumber] = useState('');
   const [buyerOrderDate, setBuyerOrderDate] = useState('');
   const [sameAsbuyer, setSameAsBuyer] = useState(true);
-  const [consigneeId, setConsigneeId] = useState('');
+  const [consigneeName, setConsigneeName] = useState('');
   const [consigneeAddress, setConsigneeAddress] = useState('');
   const [consigneeGstin, setConsigneeGstin] = useState('');
   const [consigneeStateCode, setConsigneeStateCode] = useState<number | null>(null);
+  const [selectedConsigneeRecordId, setSelectedConsigneeRecordId] = useState('');
+  const [showNewConsigneeForm, setShowNewConsigneeForm] = useState(false);
+  const [newConName, setNewConName] = useState('');
+  const [newConAddress, setNewConAddress] = useState('');
+  const [newConGstin, setNewConGstin] = useState('');
+  const [newConStateCode, setNewConStateCode] = useState<number | null>(null);
+  const [isSavingConsignee, setIsSavingConsignee] = useState(false);
   const [agentId, setAgentId] = useState('');
   const [paymentTermsDays, setPaymentTermsDays] = useState<number | ''>('');
   const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
@@ -60,6 +67,12 @@ export default function NewOrder() {
   useEffect(() => {
     if (currentFy) setFyKey(currentFy.fy_key);
   }, [currentFy]);
+
+  const { data: consignees = [], refetch: refetchConsignees } = useQuery({
+    queryKey: ['consignees', buyerId],
+    queryFn: () => fetchConsignees(buyerId),
+    enabled: !!buyerId,
+  });
 
   const { data: piData } = useQuery({
     queryKey: ['pi-next-number', fyKey],
@@ -87,29 +100,56 @@ export default function NewOrder() {
       setBuyerGstin(c.gstin ?? '');
       setBuyerStateCode(c.primary_state_code ?? null);
       if (c.payment_terms_days != null) setPaymentTermsDays(c.payment_terms_days);
-      // Auto-fill consignee from customer's stored consignee data
-      if (c.consignee_name || c.consignee_address) {
-        setSameAsBuyer(false);
-        setConsigneeId(id);
-        setConsigneeAddress(c.consignee_address ?? '');
-        setConsigneeGstin(c.consignee_gstin ?? '');
-        setConsigneeStateCode(c.consignee_state_code ?? null);
-        setGstType(determineGstType(c.consignee_state_code ?? c.primary_state_code));
-      } else {
-        setSameAsBuyer(true);
-        if (sameAsbuyer) setGstType(determineGstType(c.primary_state_code));
-      }
+      setSameAsBuyer(true);
+      setGstType(determineGstType(c.primary_state_code));
+    }
+    setSelectedConsigneeRecordId('');
+    setConsigneeName('');
+    setConsigneeAddress('');
+    setConsigneeGstin('');
+    setConsigneeStateCode(null);
+    setShowNewConsigneeForm(false);
+  };
+
+  const handleConsigneeRecordSelect = (recordId: string) => {
+    if (recordId === '__new__') {
+      setSelectedConsigneeRecordId('__new__');
+      setShowNewConsigneeForm(true);
+      return;
+    }
+    setShowNewConsigneeForm(false);
+    setSelectedConsigneeRecordId(recordId);
+    const c = (consignees as any[]).find((c: any) => c.consignee_id === recordId);
+    if (c) {
+      setConsigneeName(c.consignee_name);
+      setConsigneeAddress(c.consignee_address ?? '');
+      setConsigneeGstin(c.consignee_gstin ?? '');
+      setConsigneeStateCode(c.consignee_state_code ?? null);
+      setGstType(determineGstType(c.consignee_state_code));
     }
   };
 
-  const handleConsigneeSelect = (id: string) => {
-    setConsigneeId(id);
-    const c = customers.find((c) => c.customer_id === id);
-    if (c) {
-      setConsigneeAddress(c.primary_address ?? '');
-      setConsigneeGstin(c.gstin ?? '');
-      setConsigneeStateCode(c.primary_state_code ?? null);
-      setGstType(determineGstType(c.primary_state_code));
+  const handleSaveNewConsignee = async () => {
+    if (!newConName.trim()) return;
+    setIsSavingConsignee(true);
+    try {
+      const created: any = await createConsignee(buyerId, {
+        consignee_name: newConName.trim(),
+        consignee_address: newConAddress || null,
+        consignee_gstin: newConGstin || null,
+        consignee_state_code: newConStateCode ?? null,
+      });
+      await refetchConsignees();
+      setSelectedConsigneeRecordId(created.consignee_id);
+      setConsigneeName(created.consignee_name);
+      setConsigneeAddress(created.consignee_address ?? '');
+      setConsigneeGstin(created.consignee_gstin ?? '');
+      setConsigneeStateCode(created.consignee_state_code ?? null);
+      setGstType(determineGstType(created.consignee_state_code));
+      setShowNewConsigneeForm(false);
+      setNewConName(''); setNewConAddress(''); setNewConGstin(''); setNewConStateCode(null);
+    } finally {
+      setIsSavingConsignee(false);
     }
   };
 
@@ -146,12 +186,16 @@ export default function NewOrder() {
 
     let poCopyUrl: string | null = null;
     if (poCopyFile) {
-      const fd = new FormData();
-      fd.append('file', poCopyFile);
-      const uploadRes = await fetch(`${import.meta.env.VITE_API_URL ?? ''}/api/orders/upload-po`, { method: 'POST', body: fd });
-      if (uploadRes.ok) {
+      try {
+        const fd = new FormData();
+        fd.append('file', poCopyFile);
+        const uploadRes = await fetch(`${import.meta.env.VITE_API_URL ?? ''}/api/orders/upload-po`, { method: 'POST', body: fd });
+        if (!uploadRes.ok) throw new Error('Upload failed');
         const { url } = await uploadRes.json();
         poCopyUrl = url;
+      } catch {
+        setValidationErrors(['Failed to upload PO file. Please try again.']);
+        return;
       }
     }
 
@@ -166,7 +210,8 @@ export default function NewOrder() {
       buyer_address: buyerAddress,
       buyer_gstin: buyerGstin,
       buyer_state_code: buyerStateCode,
-      consignee_id: sameAsbuyer ? buyerId : consigneeId,
+      consignee_id: buyerId,
+      consignee_name: sameAsbuyer ? null : (consigneeName || null),
       consignee_address: sameAsbuyer ? buyerAddress : consigneeAddress,
       consignee_gstin: sameAsbuyer ? buyerGstin : consigneeGstin,
       consignee_state_code: sameAsbuyer ? buyerStateCode : consigneeStateCode,
@@ -301,32 +346,94 @@ export default function NewOrder() {
           <Section title="Ship To (Consignee)">
             <label className="flex items-center gap-2 text-sm mb-3 cursor-pointer">
               <input type="checkbox" checked={sameAsbuyer} onChange={(e) => {
-              setSameAsBuyer(e.target.checked);
-              if (e.target.checked) setGstType(determineGstType(buyerStateCode));
-              else if (consigneeStateCode) setGstType(determineGstType(consigneeStateCode));
-            }} />
+                setSameAsBuyer(e.target.checked);
+                if (e.target.checked) setGstType(determineGstType(buyerStateCode));
+                else if (consigneeStateCode) setGstType(determineGstType(consigneeStateCode));
+              }} />
               Same as buyer
             </label>
             {!sameAsbuyer && (
-              <div className="grid grid-cols-2 gap-4">
-                <Field label="Party Name" className="col-span-2">
-                  <select className="input" value={consigneeId} onChange={(e) => handleConsigneeSelect(e.target.value)}>
-                    <option value="">Select customer…</option>
-                    {customers.map((c) => <option key={c.customer_id} value={c.customer_id}>{c.party_name}</option>)}
-                  </select>
-                </Field>
-                <Field label="GSTIN">
-                  <input className="input" value={consigneeGstin} onChange={(e) => setConsigneeGstin(e.target.value)} />
-                </Field>
-                <Field label="State">
-                  <select className="input" value={consigneeStateCode ?? ''} onChange={(e) => setConsigneeStateCode(parseInt(e.target.value, 10))}>
-                    <option value="">Select state…</option>
-                    {(states as any[]).map((s: any) => <option key={s.state_code} value={s.state_code}>{s.state_name}</option>)}
-                  </select>
-                </Field>
-                <Field label="Address" className="col-span-2">
-                  <textarea className="input" rows={2} value={consigneeAddress} onChange={(e) => setConsigneeAddress(e.target.value)} />
-                </Field>
+              <div className="space-y-4">
+                {!buyerId ? (
+                  <p className="text-sm text-gray-500">Select a buyer first.</p>
+                ) : (
+                  <>
+                    <Field label="Consignee">
+                      <select
+                        className="input"
+                        value={selectedConsigneeRecordId}
+                        onChange={(e) => handleConsigneeRecordSelect(e.target.value)}
+                      >
+                        <option value="">Select consignee…</option>
+                        {(consignees as any[]).map((c: any) => (
+                          <option key={c.consignee_id} value={c.consignee_id}>{c.consignee_name}</option>
+                        ))}
+                        <option value="__new__">+ Add new consignee…</option>
+                      </select>
+                    </Field>
+
+                    {showNewConsigneeForm && (
+                      <div className="border border-dashed border-blue-300 rounded-lg p-3 space-y-3 bg-blue-50">
+                        <p className="text-xs font-semibold text-blue-700">New Consignee</p>
+                        <div className="grid grid-cols-2 gap-3">
+                          <Field label="Name *" className="col-span-2">
+                            <input className="input" value={newConName} onChange={(e) => setNewConName(e.target.value)} />
+                          </Field>
+                          <Field label="GSTIN">
+                            <input className="input" value={newConGstin} onChange={(e) => setNewConGstin(e.target.value)} />
+                          </Field>
+                          <Field label="State">
+                            <select className="input" value={newConStateCode ?? ''} onChange={(e) => setNewConStateCode(parseInt(e.target.value, 10) || null)}>
+                              <option value="">Select state…</option>
+                              {(states as any[]).map((s: any) => <option key={s.state_code} value={s.state_code}>{s.state_name}</option>)}
+                            </select>
+                          </Field>
+                          <Field label="Address" className="col-span-2">
+                            <textarea className="input" rows={2} value={newConAddress} onChange={(e) => setNewConAddress(e.target.value)} />
+                          </Field>
+                        </div>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={handleSaveNewConsignee}
+                            disabled={isSavingConsignee || !newConName.trim()}
+                            className="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
+                          >
+                            {isSavingConsignee ? 'Saving…' : 'Save'}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => { setShowNewConsigneeForm(false); setSelectedConsigneeRecordId(''); }}
+                            className="px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {selectedConsigneeRecordId && selectedConsigneeRecordId !== '__new__' && (
+                      <div className="grid grid-cols-2 gap-4">
+                        <Field label="GSTIN">
+                          <input className="input" value={consigneeGstin} onChange={(e) => setConsigneeGstin(e.target.value)} />
+                        </Field>
+                        <Field label="State">
+                          <select className="input" value={consigneeStateCode ?? ''} onChange={(e) => {
+                            const code = parseInt(e.target.value, 10);
+                            setConsigneeStateCode(code);
+                            setGstType(determineGstType(code));
+                          }}>
+                            <option value="">Select state…</option>
+                            {(states as any[]).map((s: any) => <option key={s.state_code} value={s.state_code}>{s.state_name}</option>)}
+                          </select>
+                        </Field>
+                        <Field label="Address" className="col-span-2">
+                          <textarea className="input" rows={2} value={consigneeAddress} onChange={(e) => setConsigneeAddress(e.target.value)} />
+                        </Field>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             )}
           </Section>

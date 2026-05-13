@@ -164,6 +164,39 @@ router.get('/:id/outstanding', async (req: Request, res: Response) => {
   }
 });
 
+router.get('/:id/consignees', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const rows = await sql`
+      SELECT consignee_id, buyer_id, consignee_name, consignee_address, consignee_gstin, consignee_state_code
+      FROM customer_consignees
+      WHERE buyer_id = ${id} AND deleted_at IS NULL
+      ORDER BY consignee_name
+    `;
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch consignees' });
+  }
+});
+
+router.post('/:id/consignees', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { consignee_name, consignee_address, consignee_gstin, consignee_state_code } = req.body;
+  if (!consignee_name?.trim()) return res.status(400).json({ error: 'consignee_name is required' });
+  try {
+    const rows = await sql`
+      INSERT INTO customer_consignees (buyer_id, consignee_name, consignee_address, consignee_gstin, consignee_state_code)
+      VALUES (${id}, ${consignee_name.trim()}, ${consignee_address ?? null}, ${consignee_gstin ?? null}, ${consignee_state_code ?? null})
+      RETURNING *
+    `;
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create consignee' });
+  }
+});
+
 router.get('/:id/orders', filtersMiddleware, async (req: Request, res: Response) => {
   const { id } = req.params;
   const f = req.filters;

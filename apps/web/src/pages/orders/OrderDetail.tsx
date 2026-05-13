@@ -11,7 +11,7 @@ import { uploadApprovedPi, uploadSalesBill } from '@/lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, CheckCircle, Printer, Upload, FileText, ExternalLink } from 'lucide-react';
 
-const STATUS_FLOW = ['draft', 'sent', 'approved', 'sent_to_factory', 'dispatched', 'invoiced'];
+const STATUS_FLOW = ['draft', 'sent', 'approved', 'sent_to_factory', 'invoiced', 'dispatched'];
 
 const STATUS_LABELS: Record<string, string> = {
   draft: 'Draft', sent: 'Sent for Approval', approved: 'Approved',
@@ -68,19 +68,20 @@ export default function OrderDetail() {
   const o = order as any;
   const isManagerOrAdmin = user?.role === 'manager' || user?.role === 'admin';
   const isSalesperson = user?.role === 'salesperson';
+  const isFactory = user?.role === 'factory';
 
   // Role-based next action
   const getNextAction = () => {
     if (o.status === 'draft') return { label: 'Submit for Approval', next: 'sent' };
     if (o.status === 'sent' && isManagerOrAdmin) return { label: 'Mark Approved', next: 'approved' };
     if (o.status === 'approved' && isSalesperson) return { label: 'Sent to Factory', next: 'sent_to_factory' };
-    if (o.status === 'sent_to_factory') return { label: 'Mark Dispatched', next: 'dispatched' };
-    if (o.status === 'dispatched') return { label: 'Mark Invoiced', next: 'invoiced' };
+    if (o.status === 'sent_to_factory' && isFactory) return { label: 'Mark Invoiced', next: 'invoiced' };
+    if (o.status === 'invoiced' && isFactory) return { label: 'Mark Dispatched', next: 'dispatched' };
     return null;
   };
 
   const nextAction = getNextAction();
-  const canRevise = o.status === 'invoiced' || o.status === 'cancelled';
+  const canRevise = o.status === 'dispatched' || o.status === 'invoiced' || o.status === 'cancelled';
 
   const handleStatusChange = async () => {
     if (!nextAction) return;
@@ -127,6 +128,12 @@ export default function OrderDetail() {
             )}
             {o.approved_by && (
               <p className="text-xs text-gray-400">Approved by {o.approved_by} on {o.approved_at ? new Date(o.approved_at).toLocaleString() : ''}</p>
+            )}
+            {o.invoiced_at && (
+              <p className="text-xs text-gray-400">Invoiced on {new Date(o.invoiced_at).toLocaleString()}</p>
+            )}
+            {o.dispatched_at && (
+              <p className="text-xs text-gray-400">Dispatched on {new Date(o.dispatched_at).toLocaleString()}</p>
             )}
             {o.parent_pi_number && (
               <p className="text-xs text-gray-400 mt-1">

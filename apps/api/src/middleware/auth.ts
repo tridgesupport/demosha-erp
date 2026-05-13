@@ -4,7 +4,7 @@ import jwt from 'jsonwebtoken';
 export interface AuthUser {
   user_id: string;
   email: string;
-  role: 'admin' | 'manager' | 'salesperson';
+  role: 'admin' | 'manager' | 'salesperson' | 'factory';
   name: string;
   signature_url: string | null;
 }

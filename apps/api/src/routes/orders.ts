@@ -294,22 +294,30 @@ router.put('/:id', async (req: Request, res: Response) => {
 router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => {
   const { id } = req.params;
   const { status } = req.body;
-  const VALID = ['draft', 'sent', 'approved', 'dispatched', 'invoiced', 'cancelled', 'sent_to_factory'];
+  const VALID = ['draft', 'sent', 'approved', 'invoiced', 'dispatched', 'cancelled', 'sent_to_factory'];
   if (!VALID.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+
+  if (['invoiced', 'dispatched'].includes(status) && req.user?.role !== 'factory') {
+    return res.status(403).json({ error: 'Only factory users can mark orders as invoiced or dispatched' });
+  }
 
   const userEmail = req.user?.email ?? null;
   const isApproval = status === 'approved';
   const isSubmission = status === 'sent';
+  const isInvoiced = status === 'invoiced';
+  const isDispatched = status === 'dispatched';
 
   try {
     const rows = await sql`
       UPDATE sales_orders SET
-        status     = ${status},
-        updated_at = NOW(),
-        submitted_by = CASE WHEN ${isSubmission} THEN ${userEmail} ELSE submitted_by END,
-        submitted_at = CASE WHEN ${isSubmission} THEN NOW() ELSE submitted_at END,
-        approved_by  = CASE WHEN ${isApproval}   THEN ${userEmail} ELSE approved_by END,
-        approved_at  = CASE WHEN ${isApproval}   THEN NOW()        ELSE approved_at END
+        status        = ${status},
+        updated_at    = NOW(),
+        submitted_by  = CASE WHEN ${isSubmission} THEN ${userEmail} ELSE submitted_by END,
+        submitted_at  = CASE WHEN ${isSubmission} THEN NOW()        ELSE submitted_at END,
+        approved_by   = CASE WHEN ${isApproval}   THEN ${userEmail} ELSE approved_by END,
+        approved_at   = CASE WHEN ${isApproval}   THEN NOW()        ELSE approved_at END,
+        invoiced_at   = CASE WHEN ${isInvoiced}   THEN NOW()        ELSE invoiced_at END,
+        dispatched_at = CASE WHEN ${isDispatched} THEN NOW()        ELSE dispatched_at END
       WHERE order_id = ${id} AND deleted_at IS NULL
       RETURNING *
     `;

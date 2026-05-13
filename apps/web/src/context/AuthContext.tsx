@@ -4,7 +4,7 @@ export interface AuthUser {
   user_id: string;
   email: string;
   name: string;
-  role: 'admin' | 'manager' | 'salesperson';
+  role: 'admin' | 'manager' | 'salesperson' | 'factory';
   signature_url: string | null;
 }
 

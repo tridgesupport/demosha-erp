@@ -156,9 +156,9 @@ router.post('/', async (req: Request, res: Response) => {
     }
 
     res.status(201).json({ ...order, pi_number });
-  } catch (err) {
+  } catch (err: any) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to create order' });
+    res.status(500).json({ error: err?.message ?? 'Failed to create order' });
   }
 });
 
@@ -278,9 +278,9 @@ router.put('/:id', async (req: Request, res: Response) => {
     }
 
     res.json(orderRows[0]);
-  } catch (err) {
+  } catch (err: any) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to update order' });
+    res.status(500).json({ error: err?.message ?? 'Failed to update order' });
   }
 });
 

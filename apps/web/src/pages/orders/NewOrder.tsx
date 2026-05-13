@@ -43,6 +43,8 @@ export default function NewOrder() {
   const [agentId, setAgentId] = useState('');
   const [paymentTermsDays, setPaymentTermsDays] = useState<number | ''>('');
   const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
+  const [lineErrors, setLineErrors] = useState<Record<number, string>>({});
   const [freightDesc, setFreightDesc] = useState('');
   const [freightPerKg, setFreightPerKg] = useState(0);
   const [insurancePct, setInsurancePct] = useState(0.5);
@@ -117,6 +119,26 @@ export default function NewOrder() {
   const totals = calcOrderTotals(header, lines);
 
   const handleSubmit = async (status: 'draft' | 'sent') => {
+    // Client-side validation
+    const errors: string[] = [];
+    const newLineErrors: Record<number, string> = {};
+
+    if (!buyerId) errors.push('Buyer is required');
+    if (!buyerPoNumber.trim()) errors.push('Buyer PO Number is required');
+    if (status === 'sent' && lines.length === 0) errors.push('At least one line item is required');
+
+    lines.forEach((l, idx) => {
+      if (!l.variant_id) newLineErrors[idx] = 'Select a SKU';
+      else if (!l.qty_kg || l.qty_kg <= 0) newLineErrors[idx] = 'Qty must be > 0';
+      else if (!l.rate_per_mt || l.rate_per_mt <= 0) newLineErrors[idx] = 'Rate must be > 0';
+    });
+
+    if (Object.keys(newLineErrors).length > 0) errors.push('Fix highlighted line items below');
+
+    setLineErrors(newLineErrors);
+    setValidationErrors(errors);
+    if (errors.length > 0) return;
+
     const enrichedLines = lines.map((l) => {
       const num_packages = calcNumPackages(l.qty_kg, l.qty_per_pkg);
       return { ...l, num_packages, line_amount: calcLineAmount(num_packages, l.rate_per_mt) };
@@ -162,8 +184,13 @@ export default function NewOrder() {
       status,
       lines: enrichedLines,
     };
-    const res = await createOrder.mutateAsync(body) as any;
-    navigate(`/orders/${res.order_id}`);
+    try {
+      const res = await createOrder.mutateAsync(body) as any;
+      setValidationErrors([]);
+      navigate(`/orders/${res.order_id}`);
+    } catch (err: any) {
+      setValidationErrors([err?.message ?? 'Failed to create order']);
+    }
   };
 
   return (
@@ -358,15 +385,25 @@ export default function NewOrder() {
 
           {/* Section 5: Line Items */}
           <Section title="Line Items">
-            <PiLineItemsTable lines={lines} variants={allVariants} onChange={setLines} />
+            <PiLineItemsTable lines={lines} variants={allVariants} onChange={(l) => { setLines(l); setLineErrors({}); }} lineErrors={lineErrors} />
           </Section>
+
+          {/* Validation errors */}
+          {validationErrors.length > 0 && (
+            <div className="bg-red-50 border border-red-300 rounded-lg px-4 py-3">
+              <p className="text-sm font-medium text-red-700 mb-1">Please fix the following before submitting:</p>
+              <ul className="list-disc list-inside space-y-0.5">
+                {validationErrors.map((e, i) => <li key={i} className="text-sm text-red-600">{e}</li>)}
+              </ul>
+            </div>
+          )}
 
           {/* Actions */}
           <div className="flex gap-3 pb-8">
             <button
               type="button"
               onClick={() => handleSubmit('draft')}
-              disabled={!buyerId || !buyerPoNumber || createOrder.isPending}
+              disabled={createOrder.isPending}
               className="px-5 py-2 border border-gray-300 rounded text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
             >
               Save Draft
@@ -374,14 +411,11 @@ export default function NewOrder() {
             <button
               type="button"
               onClick={() => handleSubmit('sent')}
-              disabled={!buyerId || !buyerPoNumber || lines.length === 0 || createOrder.isPending}
+              disabled={createOrder.isPending}
               className="px-5 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
             >
-              Submit for Approval
+              {createOrder.isPending ? 'Saving…' : 'Submit for Approval'}
             </button>
-            {createOrder.isError && (
-              <span className="text-red-600 text-sm self-center">{(createOrder.error as Error).message}</span>
-            )}
           </div>
         </div>
 

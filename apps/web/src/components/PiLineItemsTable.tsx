@@ -24,9 +24,10 @@ interface Props {
   lines: LineItem[];
   variants: Variant[];
   onChange: (lines: LineItem[]) => void;
+  lineErrors?: Record<number, string>;
 }
 
-export default function PiLineItemsTable({ lines, variants, onChange }: Props) {
+export default function PiLineItemsTable({ lines, variants, onChange, lineErrors = {} }: Props) {
   const addLine = () => {
     onChange([
       ...lines,
@@ -73,11 +74,11 @@ export default function PiLineItemsTable({ lines, variants, onChange }: Props) {
           </thead>
           <tbody>
             {lines.map((line, idx) => (
-              <tr key={idx} className="border-b hover:bg-gray-50">
+              <tr key={idx} className={`border-b hover:bg-gray-50 ${lineErrors[idx] ? 'bg-red-50' : ''}`}>
                 <td className="py-2 pr-2 text-gray-400">{idx + 1}</td>
                 <td className="py-2 pr-2">
                   <select
-                    className="w-full border border-gray-300 rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
+                    className={`w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500 ${lineErrors[idx] ? 'border-red-400' : 'border-gray-300'}`}
                     value={line.variant_id}
                     onChange={(e) => updateLine(idx, 'variant_id', e.target.value)}
                   >
@@ -116,13 +117,18 @@ export default function PiLineItemsTable({ lines, variants, onChange }: Props) {
                   {formatINR(calcLineAmount(calcNumPackages(line.qty_kg, line.qty_per_pkg), line.rate_per_mt))}
                 </td>
                 <td className="py-2">
-                  <button
-                    type="button"
-                    onClick={() => removeLine(idx)}
-                    className="text-gray-400 hover:text-red-500 transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4" />
-                  </button>
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      onClick={() => removeLine(idx)}
+                      className="text-gray-400 hover:text-red-500 transition-colors"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                    {lineErrors[idx] && (
+                      <span className="text-red-500 text-xs" title={lineErrors[idx]}>⚠</span>
+                    )}
+                  </div>
                 </td>
               </tr>
             ))}

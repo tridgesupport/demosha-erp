@@ -331,10 +331,23 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
   }
 });
 
+async function orderFilePrefix(id: string): Promise<string> {
+  const rows = await sql`
+    SELECT o.pi_number, b.party_name AS buyer_name
+    FROM sales_orders o
+    LEFT JOIN customers b ON b.customer_id = o.buyer_id
+    WHERE o.order_id = ${id}
+  `;
+  if (!rows.length) return id;
+  const safe = (s: string) => (s ?? '').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 40);
+  return `${safe(rows[0].pi_number)}_${safe(rows[0].buyer_name)}`;
+}
+
 router.post('/:id/upload-proforma', requireAuth, upload.single('file') as any, async (req: Request, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {
-    const { url, fileId } = await uploadToImagekit(req.file.buffer, `proforma_${req.params.id}.pdf`, 'proforma');
+    const prefix = await orderFilePrefix(req.params.id);
+    const { url, fileId } = await uploadToImagekit(req.file.buffer, `${prefix}_proforma.pdf`, 'proforma');
     await sql`UPDATE sales_orders SET proforma_url = ${url}, proforma_file_id = ${fileId} WHERE order_id = ${req.params.id}`;
     res.json({ url, fileId });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }
@@ -343,7 +356,8 @@ router.post('/:id/upload-proforma', requireAuth, upload.single('file') as any, a
 router.post('/:id/upload-approved-pi', requireAuth, requireRole('admin', 'manager'), upload.single('file') as any, async (req: Request, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {
-    const { url, fileId } = await uploadToImagekit(req.file.buffer, `approved_pi_${req.params.id}.pdf`, 'approved_proforma');
+    const prefix = await orderFilePrefix(req.params.id);
+    const { url, fileId } = await uploadToImagekit(req.file.buffer, `${prefix}_approved_pi.pdf`, 'approved_proforma');
     await sql`UPDATE sales_orders SET approved_pi_url = ${url}, approved_pi_file_id = ${fileId} WHERE order_id = ${req.params.id}`;
     res.json({ url, fileId });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }
@@ -352,7 +366,8 @@ router.post('/:id/upload-approved-pi', requireAuth, requireRole('admin', 'manage
 router.post('/:id/upload-sales-bill', requireAuth, upload.single('file') as any, async (req: Request, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {
-    const { url, fileId } = await uploadToImagekit(req.file.buffer, `sales_bill_${req.params.id}.pdf`, 'factory_sales_bill');
+    const prefix = await orderFilePrefix(req.params.id);
+    const { url, fileId } = await uploadToImagekit(req.file.buffer, `${prefix}_sales_bill.pdf`, 'factory_sales_bill');
     await sql`UPDATE sales_orders SET sales_bill_url = ${url}, sales_bill_file_id = ${fileId} WHERE order_id = ${req.params.id}`;
     res.json({ url, fileId });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }

@@ -32,50 +32,69 @@ export default function OrderDetail() {
   const [confirming, setConfirming] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
   const [generatingPdf, setGeneratingPdf] = useState(false);
+  const [generatingProforma, setGeneratingProforma] = useState(false);
 
   const buyerOutstanding = useCustomerOutstanding(order?.buyer_id);
   const printRef = useRef<HTMLDivElement>(null);
   const approvalRef = useRef<HTMLDivElement>(null);
 
-  const handlePrint = () => {
-    const content = printRef.current?.innerHTML;
-    if (!content) return;
-    const win = window.open('', '_blank', 'width=900,height=700');
-    if (!win) return;
-    win.document.write(`<!DOCTYPE html><html><head><title>PI ${o?.pi_number}</title>
-      <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: Arial, sans-serif; font-size: 11px; color: #000; background: #fff; }
-        @page { size: A4; margin: 10mm; }
-        @media print { body { -webkit-print-color-adjust: exact; } }
-      </style>
-    </head><body>${content}</body></html>`);
-    win.document.close();
-    win.focus();
-    setTimeout(() => { win.print(); }, 400);
+  const generatePdf = async (el: HTMLDivElement): Promise<Blob> => {
+    el.style.display = 'block';
+    const canvas = await html2canvas(el, { scale: 2, useCORS: true, allowTaint: false, logging: false });
+    el.style.display = 'none';
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+    const imgData = canvas.toDataURL('image/jpeg', 0.92);
+    const imgW = 210;
+    const imgH = (canvas.height * imgW) / canvas.width;
+    const pageH = 297;
+    if (imgH > pageH) {
+      let y = 0;
+      while (y < imgH) {
+        if (y > 0) pdf.addPage();
+        pdf.addImage(imgData, 'JPEG', 0, -y, imgW, imgH);
+        y += pageH;
+      }
+    } else {
+      pdf.addImage(imgData, 'JPEG', 0, 0, imgW, imgH);
+    }
+    return pdf.output('blob');
+  };
+
+  const handlePrint = async () => {
+    if (!printRef.current) return;
+    setGeneratingProforma(true);
+    try {
+      const blob = await generatePdf(printRef.current);
+      const fd = new FormData();
+      fd.append('file', blob, 'proforma.pdf');
+      const token = localStorage.getItem('token');
+      const res = await fetch(`${import.meta.env.VITE_API_URL ?? ''}/api/orders/${id}/upload-proforma`, {
+        method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd,
+      });
+      if (res.ok) {
+        const { url } = await res.json();
+        queryClient.invalidateQueries({ queryKey: ['order', id] });
+        window.open(url, '_blank');
+      } else {
+        window.open(URL.createObjectURL(blob), '_blank');
+      }
+    } catch (err) {
+      console.error('Failed to generate proforma PDF:', err);
+    } finally {
+      setGeneratingProforma(false);
+    }
   };
 
   const generateAndUploadApprovedPdf = async () => {
-    const el = approvalRef.current;
-    if (!el) return;
+    if (!approvalRef.current) return;
     setGeneratingPdf(true);
     try {
-      el.style.display = 'block';
-      const canvas = await html2canvas(el, { scale: 2, useCORS: true, allowTaint: false, logging: false });
-      el.style.display = 'none';
-      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      const imgData = canvas.toDataURL('image/jpeg', 0.92);
-      const imgW = 210;
-      const imgH = (canvas.height * imgW) / canvas.width;
-      pdf.addImage(imgData, 'JPEG', 0, 0, imgW, imgH);
-      const blob = pdf.output('blob');
+      const blob = await generatePdf(approvalRef.current);
       const fd = new FormData();
-      fd.append('file', blob, `approved_pi_${id}.pdf`);
+      fd.append('file', blob, 'approved_pi.pdf');
       const token = localStorage.getItem('token');
       await fetch(`${import.meta.env.VITE_API_URL ?? ''}/api/orders/${id}/upload-approved-pi`, {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: fd,
+        method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd,
       });
       queryClient.invalidateQueries({ queryKey: ['order', id] });
     } catch (err) {
@@ -181,8 +200,8 @@ export default function OrderDetail() {
             )}
           </div>
           <div className="flex flex-wrap gap-2 justify-end">
-            <button onClick={handlePrint} className="flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50">
-              <Printer className="w-4 h-4" /> Print Pro Forma
+            <button onClick={handlePrint} disabled={generatingProforma} className="flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50">
+              <Printer className="w-4 h-4" /> {generatingProforma ? 'Generating…' : 'Print Pro Forma'}
             </button>
             {['approved', 'sent_to_factory', 'invoiced', 'dispatched'].includes(o.status) && (
               <label className={`flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 cursor-pointer ${uploading === 'sales-bill' ? 'opacity-50' : ''}`}>

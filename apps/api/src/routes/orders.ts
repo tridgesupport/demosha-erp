@@ -298,7 +298,7 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
   const VALID = ['draft', 'sent', 'approved', 'invoiced', 'dispatched', 'cancelled', 'sent_to_factory'];
   if (!VALID.includes(status)) return res.status(400).json({ error: 'Invalid status' });
 
-  if (['invoiced', 'dispatched'].includes(status) && req.user?.role !== 'factory') {
+  if (['invoiced', 'dispatched'].includes(status) && req.user?.role?.toLowerCase() !== 'factory') {
     return res.status(403).json({ error: 'Only factory users can mark orders as invoiced or dispatched' });
   }
 

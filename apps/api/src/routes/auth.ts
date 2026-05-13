@@ -90,7 +90,8 @@ router.get('/users', requireAuth, requireRole('admin'), async (_req: Request, re
 
 // POST /api/auth/register  (admin only)
 router.post('/register', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
-  const { email, name, role, password } = req.body;
+  const { email, name, password } = req.body;
+  const role = req.body.role?.toLowerCase();
   if (!email || !name || !role || !password) return res.status(400).json({ error: 'All fields required' });
   if (!['admin', 'manager', 'salesperson', 'factory'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
   if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
@@ -121,7 +122,7 @@ router.delete('/users/:id', requireAuth, requireRole('admin'), async (req: Reque
 
 // PATCH /api/auth/users/:id/role  (admin only)
 router.patch('/users/:id/role', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
-  const { role } = req.body;
+  const role = req.body.role?.toLowerCase();
   if (!['admin', 'manager', 'salesperson', 'factory'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
   if (req.params.id === req.user!.user_id) return res.status(400).json({ error: 'Cannot change your own role' });
   try {

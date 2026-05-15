@@ -1,0 +1,188 @@
+import { Router, Request, Response } from 'express';
+import { requireAuth, requireRole } from '../middleware/auth';
+import sql from '../db/client';
+
+const router = Router();
+
+router.get('/', async (req: Request, res: Response) => {
+  const page  = Math.max(1, parseInt(String(req.query.page ?? '1'), 10));
+  const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit ?? '50'), 10)));
+  const offset = (page - 1) * limit;
+  const status = req.query.status ? String(req.query.status).split(',') : null;
+  const fyKey  = req.query.fyKey ? parseInt(String(req.query.fyKey), 10) : null;
+
+  try {
+    const [rows, countRows] = await Promise.all([
+      sql`
+        SELECT
+          i.indent_id, i.indent_number, i.fy_key, i.seq_number, i.indent_date,
+          i.indent_for, i.status, i.submitted_by, i.submitted_at, i.remarks,
+          i.created_at, i.updated_at,
+          fy.fy_label,
+          COUNT(l.line_id)::int AS line_count
+        FROM purchase_indents i
+        LEFT JOIN lookup_financial_years fy ON fy.fy_key = i.fy_key
+        LEFT JOIN purchase_indent_lines  l  ON l.indent_id = i.indent_id
+        WHERE i.deleted_at IS NULL
+          AND (${fyKey}::int IS NULL OR i.fy_key = ${fyKey}::int)
+          AND (${status}::text[] IS NULL OR i.status = ANY(${status}::text[]))
+        GROUP BY i.indent_id, fy.fy_label
+        ORDER BY i.indent_date DESC, i.seq_number DESC
+        LIMIT ${limit} OFFSET ${offset}
+      `,
+      sql`
+        SELECT COUNT(*)::int AS total FROM purchase_indents
+        WHERE deleted_at IS NULL
+          AND (${fyKey}::int IS NULL OR fy_key = ${fyKey}::int)
+          AND (${status}::text[] IS NULL OR status = ANY(${status}::text[]))
+      `,
+    ]);
+    res.json({ data: rows, total: countRows[0].total, page, limit });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch indents' });
+  }
+});
+
+router.get('/next-number', async (req: Request, res: Response) => {
+  const fyKey = parseInt(String(req.query.fyKey), 10);
+  if (isNaN(fyKey)) return res.status(400).json({ error: 'fyKey is required' });
+  try {
+    const rows = await sql`SELECT get_next_indent_number(${fyKey}::smallint) AS indent_number`;
+    res.json({ indentNumber: rows[0].indent_number });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to get next indent number' });
+  }
+});
+
+router.get('/:id', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const [indentRows, lineRows] = await Promise.all([
+      sql`
+        SELECT i.*, fy.fy_label
+        FROM purchase_indents i
+        LEFT JOIN lookup_financial_years fy ON fy.fy_key = i.fy_key
+        WHERE i.indent_id = ${id} AND i.deleted_at IS NULL
+      `,
+      sql`
+        SELECT l.*, pi.item_name, pi.default_unit
+        FROM purchase_indent_lines l
+        LEFT JOIN purchase_items pi ON pi.item_id = l.item_id
+        WHERE l.indent_id = ${id}
+        ORDER BY l.line_number
+      `,
+    ]);
+    if (!indentRows.length) return res.status(404).json({ error: 'Indent not found' });
+    res.json({ ...indentRows[0], lines: lineRows });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch indent' });
+  }
+});
+
+router.post('/', requireAuth, async (req: Request, res: Response) => {
+  const { fy_key, indent_date, indent_for, remarks, lines = [] } = req.body;
+  if (!fy_key || !indent_date) return res.status(400).json({ error: 'fy_key and indent_date are required' });
+
+  try {
+    const numRow = await sql`SELECT get_next_indent_number(${fy_key}::smallint) AS indent_number`;
+    const indent_number = numRow[0].indent_number;
+    const seq_number = parseInt(indent_number.replace(/\D/g, '').slice(-4), 10) || 0;
+
+    const indentRows = await sql`
+      INSERT INTO purchase_indents
+        (indent_number, fy_key, seq_number, indent_date, indent_for, remarks, status)
+      VALUES
+        (${indent_number}, ${fy_key}, ${seq_number}, ${indent_date}, ${indent_for ?? null}, ${remarks ?? null}, 'draft')
+      RETURNING *
+    `;
+    const indent = indentRows[0];
+
+    for (let i = 0; i < lines.length; i++) {
+      const { item_id, description, unit, quantity, stock_available, goods_required_for, preferred_brand, replacement_or_new, action_by, comments } = lines[i];
+      await sql`
+        INSERT INTO purchase_indent_lines
+          (indent_id, line_number, item_id, description, unit, quantity, stock_available, goods_required_for, preferred_brand, replacement_or_new, action_by, comments)
+        VALUES
+          (${indent.indent_id}, ${i + 1}, ${item_id ?? null}, ${description}, ${unit}, ${quantity},
+           ${stock_available ?? null}, ${goods_required_for ?? null}, ${preferred_brand ?? null},
+           ${replacement_or_new ?? null}, ${action_by ?? null}, ${comments ?? null})
+      `;
+    }
+
+    res.status(201).json({ ...indent, lines });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create indent' });
+  }
+});
+
+router.put('/:id', requireAuth, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { indent_date, indent_for, remarks, lines = [] } = req.body;
+
+  try {
+    const check = await sql`SELECT status FROM purchase_indents WHERE indent_id = ${id} AND deleted_at IS NULL`;
+    if (!check.length) return res.status(404).json({ error: 'Indent not found' });
+    if (check[0].status !== 'draft') return res.status(400).json({ error: 'Only draft indents can be edited' });
+
+    const indentRows = await sql`
+      UPDATE purchase_indents SET
+        indent_date = ${indent_date},
+        indent_for  = ${indent_for ?? null},
+        remarks     = ${remarks ?? null},
+        updated_at  = NOW()
+      WHERE indent_id = ${id}
+      RETURNING *
+    `;
+
+    await sql`DELETE FROM purchase_indent_lines WHERE indent_id = ${id}`;
+    for (let i = 0; i < lines.length; i++) {
+      const { item_id, description, unit, quantity, stock_available, goods_required_for, preferred_brand, replacement_or_new, action_by, comments } = lines[i];
+      await sql`
+        INSERT INTO purchase_indent_lines
+          (indent_id, line_number, item_id, description, unit, quantity, stock_available, goods_required_for, preferred_brand, replacement_or_new, action_by, comments)
+        VALUES
+          (${id}, ${i + 1}, ${item_id ?? null}, ${description}, ${unit}, ${quantity},
+           ${stock_available ?? null}, ${goods_required_for ?? null}, ${preferred_brand ?? null},
+           ${replacement_or_new ?? null}, ${action_by ?? null}, ${comments ?? null})
+      `;
+    }
+
+    res.json(indentRows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update indent' });
+  }
+});
+
+router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { status } = req.body;
+  const VALID = ['submitted', 'po_raised', 'cancelled'];
+  if (!VALID.includes(status)) return res.status(400).json({ error: 'Invalid status' });
+
+  const userEmail = req.user?.email ?? null;
+  const isSubmission = status === 'submitted';
+
+  try {
+    const rows = await sql`
+      UPDATE purchase_indents SET
+        status       = ${status},
+        updated_at   = NOW(),
+        submitted_by = CASE WHEN ${isSubmission} THEN ${userEmail} ELSE submitted_by END,
+        submitted_at = CASE WHEN ${isSubmission} THEN NOW()        ELSE submitted_at END
+      WHERE indent_id = ${id} AND deleted_at IS NULL
+      RETURNING *
+    `;
+    if (!rows.length) return res.status(404).json({ error: 'Indent not found' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update status' });
+  }
+});
+
+export default router;

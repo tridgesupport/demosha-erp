@@ -13,6 +13,12 @@ import CustomerDetail from '@/pages/customers/CustomerDetail';
 import Products from '@/pages/catalog/Products';
 import Outstanding from '@/pages/finance/Outstanding';
 import Settings from '@/pages/Settings';
+import IndentsList from '@/pages/purchase/IndentsList';
+import NewIndent from '@/pages/purchase/NewIndent';
+import IndentDetail from '@/pages/purchase/IndentDetail';
+import PurchaseOrdersList from '@/pages/purchase/PurchaseOrdersList';
+import NewPurchaseOrder from '@/pages/purchase/NewPurchaseOrder';
+import PurchaseOrderDetail from '@/pages/purchase/PurchaseOrderDetail';
 
 const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: string; exact?: boolean }[] }> = {
   sales: {
@@ -26,6 +32,8 @@ const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: st
   purchase: {
     label: 'Purchase',
     links: [
+      { to: '/purchase/indents', label: 'Indents' },
+      { to: '/purchase/orders', label: 'Purchase Orders' },
       { to: '/catalog/products', label: 'Catalog' },
     ],
   },
@@ -77,7 +85,9 @@ export default function App() {
   const hideFilterBar = location.pathname.startsWith('/settings') ||
     location.pathname === '/orders/new' ||
     location.pathname.match(/^\/orders\/.+\/edit$/) ||
-    location.pathname === '/login';
+    location.pathname === '/login' ||
+    location.pathname === '/purchase/indents/new' ||
+    location.pathname === '/purchase/orders/new';
 
   if (location.pathname === '/login') {
     return (
@@ -95,7 +105,7 @@ export default function App() {
     admin: ['sales', 'purchase', 'management'],
     manager: ['sales', 'purchase', 'management'],
     salesperson: ['sales'],
-    factory: ['management'],
+    factory: ['purchase', 'management'],
   };
   const allowed = (user?.allowed_tabs?.length ? user.allowed_tabs : (user?.role ? ROLE_DEFAULTS[user.role] ?? [] : []));
   const activeTab = getActiveTab(location.pathname);
@@ -178,6 +188,12 @@ export default function App() {
                 <Route path="/catalog/products" element={<Products />} />
                 <Route path="/finance/outstanding" element={<Outstanding />} />
                 <Route path="/settings" element={<Settings />} />
+                <Route path="/purchase/indents" element={<IndentsList />} />
+                <Route path="/purchase/indents/new" element={<NewIndent />} />
+                <Route path="/purchase/indents/:id" element={<IndentDetail />} />
+                <Route path="/purchase/orders" element={<PurchaseOrdersList />} />
+                <Route path="/purchase/orders/new" element={<NewPurchaseOrder />} />
+                <Route path="/purchase/orders/:id" element={<PurchaseOrderDetail />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </TabGuard>

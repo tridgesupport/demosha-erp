@@ -174,6 +174,73 @@ export const syncTallyFile = (file: File) => {
   return fetch(`${BASE_URL}/api/finance/sync`, { method: 'POST', body: form }).then((r) => r.json());
 };
 
+// Purchase Items
+export const fetchPurchaseItems = (search?: string) =>
+  request(`/api/purchase/items/search${search ? `?q=${encodeURIComponent(search)}` : '?q='}`);
+
+export const createPurchaseItem = (body: unknown) =>
+  request('/api/purchase/items', { method: 'POST', body: JSON.stringify(body) });
+
+// Purchase Indents
+export const fetchPurchaseIndents = (params?: { fyKey?: number; status?: string[]; page?: number }) => {
+  const p = new URLSearchParams();
+  if (params?.fyKey != null) p.set('fyKey', String(params.fyKey));
+  if (params?.status?.length) p.set('status', params.status.join(','));
+  if (params?.page) p.set('page', String(params.page));
+  const qs = p.toString();
+  return request(`/api/purchase/indents${qs ? `?${qs}` : ''}`);
+};
+
+export const fetchPurchaseIndent = (id: string) =>
+  request(`/api/purchase/indents/${id}`);
+
+export const fetchNextIndentNumber = (fyKey: number) =>
+  request<{ indentNumber: string }>(`/api/purchase/indents/next-number?fyKey=${fyKey}`);
+
+export const createPurchaseIndent = (body: unknown) =>
+  request('/api/purchase/indents', { method: 'POST', body: JSON.stringify(body) });
+
+export const updatePurchaseIndent = (id: string, body: unknown) =>
+  request(`/api/purchase/indents/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+
+export const updatePurchaseIndentStatus = (id: string, status: string) =>
+  request(`/api/purchase/indents/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+
+// Purchase Orders
+export const fetchPurchaseOrders = (params?: { fyKey?: number; status?: string[]; page?: number }) => {
+  const p = new URLSearchParams();
+  if (params?.fyKey != null) p.set('fyKey', String(params.fyKey));
+  if (params?.status?.length) p.set('status', params.status.join(','));
+  if (params?.page) p.set('page', String(params.page));
+  const qs = p.toString();
+  return request(`/api/purchase/orders${qs ? `?${qs}` : ''}`);
+};
+
+export const fetchPurchaseOrder = (id: string) =>
+  request(`/api/purchase/orders/${id}`);
+
+export const fetchNextPoNumber = (fyKey: number) =>
+  request<{ seqNumber: number }>(`/api/purchase/orders/next-number?fyKey=${fyKey}`);
+
+export const createPurchaseOrder = (body: unknown) =>
+  request('/api/purchase/orders', { method: 'POST', body: JSON.stringify(body) });
+
+export const updatePurchaseOrder = (id: string, body: unknown) =>
+  request(`/api/purchase/orders/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+
+export const updatePurchaseOrderStatus = (id: string, status: string, grn_number?: string) =>
+  request(`/api/purchase/orders/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, grn_number }) });
+
+export const uploadPoPdf = (orderId: string, file: Blob, filename: string) => {
+  const fd = new FormData(); fd.append('file', file, filename);
+  return fetch(`${BASE_URL}/api/purchase/orders/${orderId}/upload-po-pdf`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
+};
+
+export const uploadApprovedPo = (orderId: string, file: File) => {
+  const fd = new FormData(); fd.append('file', file);
+  return fetch(`${BASE_URL}/api/purchase/orders/${orderId}/upload-approved-po`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
+};
+
 // Lookup
 export const fetchStates = () => request('/api/lookup/states');
 export const fetchFinancialYears = () => request('/api/lookup/financial-years');

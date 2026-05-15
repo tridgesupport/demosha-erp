@@ -90,9 +90,16 @@ export default function App() {
     );
   }
 
-  const allowed = user?.allowed_tabs ?? [];
+  // Fall back to role-based defaults if allowed_tabs is missing/empty (e.g. stale session before API redeploy)
+  const ROLE_DEFAULTS: Record<string, string[]> = {
+    admin: ['sales', 'purchase', 'management'],
+    manager: ['sales', 'purchase', 'management'],
+    salesperson: ['sales'],
+    factory: ['management'],
+  };
+  const allowed = (user?.allowed_tabs?.length ? user.allowed_tabs : (user?.role ? ROLE_DEFAULTS[user.role] ?? [] : []));
   const activeTab = getActiveTab(location.pathname);
-  const subLinks = activeTab ? TAB_CONFIG[activeTab]?.links ?? [] : [];
+  const subLinks = (activeTab && allowed.includes(activeTab)) ? TAB_CONFIG[activeTab]?.links ?? [] : [];
 
   return (
     <RequireAuth>

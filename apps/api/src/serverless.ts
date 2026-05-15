@@ -9,6 +9,9 @@ import customersRouter from './routes/customers';
 import catalogRouter from './routes/catalog';
 import financeRouter from './routes/finance';
 import lookupRouter from './routes/lookup';
+import purchaseItemsRouter from './routes/purchase_items';
+import purchaseIndentsRouter from './routes/purchase_indents';
+import purchaseOrdersRouter from './routes/purchase_orders';
 
 const app = express();
 
@@ -26,7 +29,7 @@ const bootstrapped = sql`
         INSERT INTO role_tab_permissions (role, tab) VALUES
           ('admin','sales'),('admin','purchase'),('admin','management'),
           ('manager','sales'),('manager','purchase'),('manager','management'),
-          ('salesperson','sales'),('factory','management')
+          ('salesperson','sales'),('factory','purchase'),('factory','management')
       `;
     }
   })
@@ -47,6 +50,9 @@ app.use('/api/customers', customersRouter);
 app.use('/api/catalog', catalogRouter);
 app.use('/api/finance', financeRouter);
 app.use('/api/lookup', lookupRouter);
+app.use('/api/purchase/items', purchaseItemsRouter);
+app.use('/api/purchase/indents', purchaseIndentsRouter);
+app.use('/api/purchase/orders', purchaseOrdersRouter);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

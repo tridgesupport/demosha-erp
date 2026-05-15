@@ -174,6 +174,13 @@ export const syncTallyFile = (file: File) => {
   return fetch(`${BASE_URL}/api/finance/sync`, { method: 'POST', body: form }).then((r) => r.json());
 };
 
+// Purchase Departments
+export const fetchPurchaseDepartments = () =>
+  request('/api/purchase/indents/departments');
+
+export const createPurchaseDepartment = (dept_name: string) =>
+  request('/api/purchase/indents/departments', { method: 'POST', body: JSON.stringify({ dept_name }) });
+
 // Purchase Items
 export const fetchPurchaseItems = (search?: string) =>
   request(`/api/purchase/items/search${search ? `?q=${encodeURIComponent(search)}` : '?q='}`);

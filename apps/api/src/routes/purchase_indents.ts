@@ -1,8 +1,29 @@
 import { Router, Request, Response } from 'express';
-import { requireAuth, requireRole } from '../middleware/auth';
+import { requireAuth } from '../middleware/auth';
 import sql from '../db/client';
 
 const router = Router();
+
+// Departments CRUD
+router.get('/departments', async (_req: Request, res: Response) => {
+  try {
+    const rows = await sql`SELECT dept_id, dept_name FROM purchase_departments ORDER BY dept_name`;
+    res.json(rows);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Failed to fetch departments' }); }
+});
+
+router.post('/departments', requireAuth, async (req: Request, res: Response) => {
+  const { dept_name } = req.body;
+  if (!dept_name?.trim()) return res.status(400).json({ error: 'dept_name is required' });
+  try {
+    const rows = await sql`
+      INSERT INTO purchase_departments (dept_name) VALUES (${dept_name.trim()})
+      ON CONFLICT (dept_name) DO UPDATE SET dept_name = EXCLUDED.dept_name
+      RETURNING *
+    `;
+    res.status(201).json(rows[0]);
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Failed to create department' }); }
+});
 
 router.get('/', async (req: Request, res: Response) => {
   const page  = Math.max(1, parseInt(String(req.query.page ?? '1'), 10));
@@ -16,8 +37,9 @@ router.get('/', async (req: Request, res: Response) => {
       sql`
         SELECT
           i.indent_id, i.indent_number, i.fy_key, i.seq_number, i.indent_date,
-          i.indent_for, i.status, i.submitted_by, i.submitted_at, i.remarks,
-          i.created_at, i.updated_at,
+          i.company, i.indent_for, i.status,
+          i.submitted_by, i.submitted_at, i.approved_by, i.approved_at,
+          i.remarks, i.created_at, i.updated_at,
           fy.fy_label,
           COUNT(l.line_id)::int AS line_count
         FROM purchase_indents i
@@ -61,9 +83,12 @@ router.get('/:id', async (req: Request, res: Response) => {
   try {
     const [indentRows, lineRows] = await Promise.all([
       sql`
-        SELECT i.*, fy.fy_label
+        SELECT i.*, fy.fy_label,
+          u.signature_url AS approver_signature_url,
+          u.name          AS approver_name
         FROM purchase_indents i
         LEFT JOIN lookup_financial_years fy ON fy.fy_key = i.fy_key
+        LEFT JOIN users u ON u.email = i.approved_by AND u.deleted_at IS NULL
         WHERE i.indent_id = ${id} AND i.deleted_at IS NULL
       `,
       sql`
@@ -83,7 +108,7 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 router.post('/', requireAuth, async (req: Request, res: Response) => {
-  const { fy_key, indent_date, indent_for, remarks, lines = [] } = req.body;
+  const { fy_key, company = 'DCPL', indent_date, indent_for, remarks, lines = [] } = req.body;
   if (!fy_key || !indent_date) return res.status(400).json({ error: 'fy_key and indent_date are required' });
 
   try {
@@ -93,9 +118,10 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
     const indentRows = await sql`
       INSERT INTO purchase_indents
-        (indent_number, fy_key, seq_number, indent_date, indent_for, remarks, status)
+        (indent_number, fy_key, seq_number, company, indent_date, indent_for, remarks, status)
       VALUES
-        (${indent_number}, ${fy_key}, ${seq_number}, ${indent_date}, ${indent_for ?? null}, ${remarks ?? null}, 'draft')
+        (${indent_number}, ${fy_key}, ${seq_number}, ${company}, ${indent_date},
+         ${indent_for ?? null}, ${remarks ?? null}, 'draft')
       RETURNING *
     `;
     const indent = indentRows[0];
@@ -104,7 +130,8 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
       const { item_id, description, unit, quantity, stock_available, goods_required_for, preferred_brand, replacement_or_new, action_by, comments } = lines[i];
       await sql`
         INSERT INTO purchase_indent_lines
-          (indent_id, line_number, item_id, description, unit, quantity, stock_available, goods_required_for, preferred_brand, replacement_or_new, action_by, comments)
+          (indent_id, line_number, item_id, description, unit, quantity, stock_available,
+           goods_required_for, preferred_brand, replacement_or_new, action_by, comments)
         VALUES
           (${indent.indent_id}, ${i + 1}, ${item_id ?? null}, ${description}, ${unit}, ${quantity},
            ${stock_available ?? null}, ${goods_required_for ?? null}, ${preferred_brand ?? null},
@@ -121,7 +148,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
 
 router.put('/:id', requireAuth, async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { indent_date, indent_for, remarks, lines = [] } = req.body;
+  const { company, indent_date, indent_for, remarks, lines = [] } = req.body;
 
   try {
     const check = await sql`SELECT status FROM purchase_indents WHERE indent_id = ${id} AND deleted_at IS NULL`;
@@ -130,6 +157,7 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
 
     const indentRows = await sql`
       UPDATE purchase_indents SET
+        company     = ${company ?? 'DCPL'},
         indent_date = ${indent_date},
         indent_for  = ${indent_for ?? null},
         remarks     = ${remarks ?? null},
@@ -143,7 +171,8 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
       const { item_id, description, unit, quantity, stock_available, goods_required_for, preferred_brand, replacement_or_new, action_by, comments } = lines[i];
       await sql`
         INSERT INTO purchase_indent_lines
-          (indent_id, line_number, item_id, description, unit, quantity, stock_available, goods_required_for, preferred_brand, replacement_or_new, action_by, comments)
+          (indent_id, line_number, item_id, description, unit, quantity, stock_available,
+           goods_required_for, preferred_brand, replacement_or_new, action_by, comments)
         VALUES
           (${id}, ${i + 1}, ${item_id ?? null}, ${description}, ${unit}, ${quantity},
            ${stock_available ?? null}, ${goods_required_for ?? null}, ${preferred_brand ?? null},
@@ -161,11 +190,16 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
 router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => {
   const { id } = req.params;
   const { status } = req.body;
-  const VALID = ['submitted', 'po_raised', 'cancelled'];
+  const VALID = ['submitted', 'approved', 'po_raised', 'cancelled'];
   if (!VALID.includes(status)) return res.status(400).json({ error: 'Invalid status' });
 
-  const userEmail = req.user?.email ?? null;
+  if (status === 'approved' && !['admin', 'manager'].includes(req.user?.role?.toLowerCase() ?? '')) {
+    return res.status(403).json({ error: 'Only managers or admins can approve indents' });
+  }
+
+  const userEmail    = req.user?.email ?? null;
   const isSubmission = status === 'submitted';
+  const isApproval   = status === 'approved';
 
   try {
     const rows = await sql`
@@ -173,7 +207,9 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
         status       = ${status},
         updated_at   = NOW(),
         submitted_by = CASE WHEN ${isSubmission} THEN ${userEmail} ELSE submitted_by END,
-        submitted_at = CASE WHEN ${isSubmission} THEN NOW()        ELSE submitted_at END
+        submitted_at = CASE WHEN ${isSubmission} THEN NOW()        ELSE submitted_at END,
+        approved_by  = CASE WHEN ${isApproval}   THEN ${userEmail} ELSE approved_by END,
+        approved_at  = CASE WHEN ${isApproval}   THEN NOW()        ELSE approved_at END
       WHERE indent_id = ${id} AND deleted_at IS NULL
       RETURNING *
     `;

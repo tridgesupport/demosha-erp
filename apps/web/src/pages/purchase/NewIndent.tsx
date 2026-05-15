@@ -1,14 +1,22 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { fetchFinancialYears, fetchNextIndentNumber, fetchPurchaseItems, createPurchaseItem } from '@/lib/api';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  fetchFinancialYears, fetchNextIndentNumber, fetchPurchaseItems,
+  createPurchaseItem, fetchPurchaseDepartments, createPurchaseDepartment,
+} from '@/lib/api';
 import { useCreatePurchaseIndent } from '@/hooks/usePurchaseIndents';
 import { format } from 'date-fns';
-import { Plus, Trash2, Search } from 'lucide-react';
+import { Plus, Trash2, Search, ChevronDown } from 'lucide-react';
 
 const UNITS = ['Nos.', 'MTON', 'Kgs', 'Ltrs', 'Set', 'Pair', 'Mtr', 'Box', 'Roll', 'Sheet', 'Bag', 'Drum', 'Can'];
 const ACTION_BY_OPTIONS = ['Valsad', 'Mumbai', 'Both'];
 const REPLACEMENT_OPTIONS = ['Replacement', 'New'];
+
+const COMPANIES = [
+  { value: 'DCPL', label: 'Demosha Chemicals Pvt. Ltd.' },
+  { value: 'WIC',  label: 'Western India Chemicals' },
+];
 
 interface LineItem {
   item_id: string | null;
@@ -43,7 +51,7 @@ function ItemSearchCell({ line, idx, onChange }: {
   const [newItemUnit, setNewItemUnit] = useState('Nos.');
   const ref = useRef<HTMLDivElement>(null);
 
-  const { data: results = [], refetch } = useQuery({
+  const { data: results = [] } = useQuery({
     queryKey: ['purchase-items-search', query],
     queryFn: () => fetchPurchaseItems(query),
     enabled: open && query.length >= 1,
@@ -79,7 +87,7 @@ function ItemSearchCell({ line, idx, onChange }: {
           value={query}
           onChange={(e) => { setQuery(e.target.value); onChange(idx, { description: e.target.value, item_id: null }); setOpen(true); }}
           onFocus={() => setOpen(true)}
-          placeholder="Search or type description..."
+          placeholder="Search or type..."
           className="border border-gray-300 rounded px-2 py-1 text-sm w-full"
         />
         <Search className="w-4 h-4 text-gray-400 shrink-0" />
@@ -87,19 +95,14 @@ function ItemSearchCell({ line, idx, onChange }: {
       {open && (
         <div className="absolute z-20 bg-white border border-gray-200 rounded shadow-lg mt-1 w-72 max-h-52 overflow-y-auto">
           {(results as any[]).map((item: any) => (
-            <div
-              key={item.item_id}
-              onMouseDown={() => select(item)}
-              className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-sm"
-            >
+            <div key={item.item_id} onMouseDown={() => select(item)}
+              className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-sm">
               <span className="font-medium">{item.item_name}</span>
               {item.default_unit && <span className="text-gray-400 ml-2 text-xs">({item.default_unit})</span>}
             </div>
           ))}
-          <div
-            onMouseDown={() => { setCreating(true); setOpen(false); }}
-            className="px-3 py-2 hover:bg-green-50 cursor-pointer text-sm text-green-700 border-t border-gray-100 flex items-center gap-1"
-          >
+          <div onMouseDown={() => { setCreating(true); setOpen(false); }}
+            className="px-3 py-2 hover:bg-green-50 cursor-pointer text-sm text-green-700 border-t border-gray-100 flex items-center gap-1">
             <Plus className="w-3 h-3" /> Create new item "{query}"
           </div>
         </div>
@@ -107,18 +110,10 @@ function ItemSearchCell({ line, idx, onChange }: {
       {creating && (
         <div className="absolute z-20 bg-white border border-gray-200 rounded shadow-lg mt-1 p-3 w-72 space-y-2">
           <p className="text-xs font-medium text-gray-700">New Item</p>
-          <input
-            autoFocus
-            value={newItemName || query}
-            onChange={(e) => setNewItemName(e.target.value)}
-            placeholder="Item name"
-            className="border border-gray-300 rounded px-2 py-1 text-sm w-full"
-          />
-          <select
-            value={newItemUnit}
-            onChange={(e) => setNewItemUnit(e.target.value)}
-            className="border border-gray-300 rounded px-2 py-1 text-sm w-full"
-          >
+          <input autoFocus value={newItemName || query} onChange={(e) => setNewItemName(e.target.value)}
+            placeholder="Item name" className="border border-gray-300 rounded px-2 py-1 text-sm w-full" />
+          <select value={newItemUnit} onChange={(e) => setNewItemUnit(e.target.value)}
+            className="border border-gray-300 rounded px-2 py-1 text-sm w-full">
             {UNITS.map((u) => <option key={u}>{u}</option>)}
           </select>
           <div className="flex gap-2">
@@ -131,6 +126,56 @@ function ItemSearchCell({ line, idx, onChange }: {
   );
 }
 
+function DepartmentSelect({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  const qc = useQueryClient();
+  const [addingNew, setAddingNew] = useState(false);
+  const [newDept, setNewDept] = useState('');
+  const [saving, setSaving] = useState(false);
+  const { data: depts = [] } = useQuery({ queryKey: ['purchase-departments'], queryFn: fetchPurchaseDepartments });
+
+  const handleAdd = async () => {
+    if (!newDept.trim()) return;
+    setSaving(true);
+    try {
+      const created: any = await createPurchaseDepartment(newDept.trim());
+      await qc.invalidateQueries({ queryKey: ['purchase-departments'] });
+      onChange(created.dept_name);
+      setAddingNew(false);
+      setNewDept('');
+    } finally { setSaving(false); }
+  };
+
+  if (addingNew) {
+    return (
+      <div className="flex items-center gap-1">
+        <input autoFocus value={newDept} onChange={(e) => setNewDept(e.target.value)}
+          placeholder="New department name"
+          className="border border-gray-300 rounded px-2 py-1.5 text-sm flex-1"
+          onKeyDown={(e) => { if (e.key === 'Enter') handleAdd(); if (e.key === 'Escape') setAddingNew(false); }}
+        />
+        <button onClick={handleAdd} disabled={saving}
+          className="px-2 py-1.5 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-60">
+          {saving ? '…' : 'Add'}
+        </button>
+        <button onClick={() => setAddingNew(false)} className="px-2 py-1.5 border text-xs rounded">✕</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <select value={value} onChange={(e) => {
+        if (e.target.value === '__add__') { setAddingNew(true); }
+        else onChange(e.target.value);
+      }} className="border border-gray-300 rounded px-2 py-1.5 text-sm flex-1">
+        <option value="">— Select —</option>
+        {(depts as any[]).map((d: any) => <option key={d.dept_id} value={d.dept_name}>{d.dept_name}</option>)}
+        <option value="__add__">+ Add new department…</option>
+      </select>
+    </div>
+  );
+}
+
 export default function NewIndent() {
   const navigate = useNavigate();
   const createIndent = useCreatePurchaseIndent();
@@ -139,6 +184,7 @@ export default function NewIndent() {
   const currentFy: any = (fyList as any[]).find((f: any) => f.is_current) ?? (fyList as any[])[0];
 
   const [fyKey, setFyKey] = useState<number | null>(null);
+  const [company, setCompany] = useState<'DCPL' | 'WIC'>('DCPL');
   const [indentDate, setIndentDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [indentFor, setIndentFor] = useState('');
   const [remarks, setRemarks] = useState('');
@@ -154,16 +200,11 @@ export default function NewIndent() {
     enabled: fyKey != null,
   });
 
-  const updateLine = (idx: number, patch: Partial<LineItem>) => {
+  const updateLine = (idx: number, patch: Partial<LineItem>) =>
     setLines((prev) => prev.map((l, i) => i === idx ? { ...l, ...patch } : l));
-  };
 
   const addLine = () => setLines((prev) => [...prev, emptyLine()]);
-
-  const removeLine = (idx: number) => {
-    if (lines.length === 1) return;
-    setLines((prev) => prev.filter((_, i) => i !== idx));
-  };
+  const removeLine = (idx: number) => { if (lines.length > 1) setLines((prev) => prev.filter((_, i) => i !== idx)); };
 
   const validate = () => {
     const errs: string[] = [];
@@ -172,7 +213,6 @@ export default function NewIndent() {
     lines.forEach((l, i) => {
       if (!l.description.trim()) errs.push(`Line ${i + 1}: description is required`);
       if (!l.quantity || isNaN(Number(l.quantity)) || Number(l.quantity) <= 0) errs.push(`Line ${i + 1}: valid quantity is required`);
-      if (!l.unit) errs.push(`Line ${i + 1}: unit is required`);
     });
     return errs;
   };
@@ -185,7 +225,7 @@ export default function NewIndent() {
     setSaving(true);
     try {
       const result: any = await createIndent.mutateAsync({
-        fy_key: fyKey,
+        fy_key: fyKey, company,
         indent_date: indentDate,
         indent_for: indentFor || null,
         remarks: remarks || null,
@@ -205,18 +245,18 @@ export default function NewIndent() {
       navigate(`/purchase/indents/${result.indent_id}`);
     } catch (err: any) {
       setErrors([err.message ?? 'Failed to create indent']);
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6 pb-16">
+    <div className="max-w-6xl mx-auto space-y-6 pb-16">
       <div className="flex items-center gap-3">
         <button onClick={() => navigate(-1)} className="text-gray-500 hover:text-gray-700 text-sm">← Back</button>
         <h1 className="text-2xl font-bold text-gray-900">New Indent</h1>
         {numData?.indentNumber && (
-          <span className="ml-auto text-sm text-gray-500 font-mono">{numData.indentNumber}</span>
+          <span className="ml-auto text-sm text-gray-500 font-mono bg-gray-100 px-2 py-1 rounded">
+            {numData.indentNumber}
+          </span>
         )}
       </div>
 
@@ -228,159 +268,120 @@ export default function NewIndent() {
 
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Header */}
-        <div className="bg-white border border-gray-200 rounded-lg p-5 grid grid-cols-3 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Financial Year</label>
-            <select
-              value={fyKey ?? ''}
-              onChange={(e) => setFyKey(Number(e.target.value))}
-              className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full"
-            >
-              {(fyList as any[]).map((fy: any) => (
-                <option key={fy.fy_key} value={fy.fy_key}>{fy.fy_label}</option>
-              ))}
-            </select>
+        <div className="bg-white border border-gray-200 rounded-lg p-5 space-y-4">
+          <h2 className="text-sm font-semibold text-gray-700">Indent Details</h2>
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Company</label>
+              <select value={company} onChange={(e) => setCompany(e.target.value as any)}
+                className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full">
+                {COMPANIES.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Financial Year</label>
+              <select value={fyKey ?? ''} onChange={(e) => setFyKey(Number(e.target.value))}
+                className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full">
+                {(fyList as any[]).map((fy: any) => <option key={fy.fy_key} value={fy.fy_key}>{fy.fy_label}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Indent Date</label>
+              <input type="date" value={indentDate} onChange={(e) => setIndentDate(e.target.value)}
+                className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Indent For (Department)</label>
+              <DepartmentSelect value={indentFor} onChange={setIndentFor} />
+            </div>
           </div>
           <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Indent Date</label>
-            <input
-              type="date"
-              value={indentDate}
-              onChange={(e) => setIndentDate(e.target.value)}
-              className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full"
-            />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-1">Indent For (Department / Plant)</label>
-            <input
-              type="text"
-              value={indentFor}
-              onChange={(e) => setIndentFor(e.target.value)}
-              placeholder="e.g. Power Plant, 2nd Plant"
-              className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full"
-            />
-          </div>
-          <div className="col-span-3">
             <label className="block text-xs font-medium text-gray-600 mb-1">Remarks</label>
-            <input
-              type="text"
-              value={remarks}
-              onChange={(e) => setRemarks(e.target.value)}
+            <input type="text" value={remarks} onChange={(e) => setRemarks(e.target.value)}
               placeholder="Overall remarks..."
-              className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full"
-            />
+              className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
           </div>
         </div>
 
         {/* Line Items */}
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-gray-700">Line Items</h2>
+          <div className="px-5 py-3 border-b border-gray-100">
+            <h2 className="text-sm font-semibold text-gray-700">Items</h2>
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full text-xs">
               <thead className="bg-gray-50 text-gray-500">
                 <tr>
                   <th className="px-3 py-2 text-left w-8">#</th>
-                  <th className="px-3 py-2 text-left min-w-56">Description</th>
+                  <th className="px-3 py-2 text-left min-w-52">Description</th>
                   <th className="px-3 py-2 text-left w-24">Unit</th>
-                  <th className="px-3 py-2 text-left w-24">Qty</th>
-                  <th className="px-3 py-2 text-left w-24">Stock</th>
-                  <th className="px-3 py-2 text-left w-32">Required For</th>
+                  <th className="px-3 py-2 text-left w-20">Qty</th>
+                  <th className="px-3 py-2 text-left w-20">Stock</th>
+                  <th className="px-3 py-2 text-left w-32">Goods Required For</th>
                   <th className="px-3 py-2 text-left w-32">Pref. Brand</th>
                   <th className="px-3 py-2 text-left w-28">Repl./New</th>
                   <th className="px-3 py-2 text-left w-24">Action By</th>
-                  <th className="px-3 py-2 text-left w-36">Comments</th>
+                  <th className="px-3 py-2 text-left w-32">Remarks</th>
                   <th className="px-3 py-2 w-8"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {lines.map((line, idx) => (
                   <tr key={idx} className="align-top">
-                    <td className="px-3 py-2 text-gray-400">{idx + 1}</td>
+                    <td className="px-3 py-2 text-gray-400 pt-3">{idx + 1}</td>
                     <td className="px-3 py-2">
                       <ItemSearchCell line={line} idx={idx} onChange={updateLine} />
                     </td>
                     <td className="px-3 py-2">
-                      <select
-                        value={line.unit}
-                        onChange={(e) => updateLine(idx, { unit: e.target.value })}
-                        className="border border-gray-300 rounded px-1 py-1 text-xs w-full"
-                      >
+                      <select value={line.unit} onChange={(e) => updateLine(idx, { unit: e.target.value })}
+                        className="border border-gray-300 rounded px-1 py-1 text-xs w-full">
                         {UNITS.map((u) => <option key={u}>{u}</option>)}
                       </select>
                     </td>
                     <td className="px-3 py-2">
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        value={line.quantity}
+                      <input type="number" min="0" step="any" value={line.quantity}
                         onChange={(e) => updateLine(idx, { quantity: e.target.value })}
-                        className="border border-gray-300 rounded px-1 py-1 text-xs w-full"
-                      />
+                        className="border border-gray-300 rounded px-1 py-1 text-xs w-full" />
                     </td>
                     <td className="px-3 py-2">
-                      <input
-                        type="number"
-                        min="0"
-                        step="any"
-                        value={line.stock_available}
+                      <input type="number" min="0" step="any" value={line.stock_available}
                         onChange={(e) => updateLine(idx, { stock_available: e.target.value })}
                         placeholder="0"
-                        className="border border-gray-300 rounded px-1 py-1 text-xs w-full"
-                      />
+                        className="border border-gray-300 rounded px-1 py-1 text-xs w-full" />
                     </td>
                     <td className="px-3 py-2">
-                      <input
-                        type="text"
-                        value={line.goods_required_for}
+                      <input type="text" value={line.goods_required_for}
                         onChange={(e) => updateLine(idx, { goods_required_for: e.target.value })}
-                        className="border border-gray-300 rounded px-1 py-1 text-xs w-full"
-                      />
+                        className="border border-gray-300 rounded px-1 py-1 text-xs w-full" />
                     </td>
                     <td className="px-3 py-2">
-                      <input
-                        type="text"
-                        value={line.preferred_brand}
+                      <input type="text" value={line.preferred_brand}
                         onChange={(e) => updateLine(idx, { preferred_brand: e.target.value })}
-                        className="border border-gray-300 rounded px-1 py-1 text-xs w-full"
-                      />
+                        className="border border-gray-300 rounded px-1 py-1 text-xs w-full" />
                     </td>
                     <td className="px-3 py-2">
-                      <select
-                        value={line.replacement_or_new}
+                      <select value={line.replacement_or_new}
                         onChange={(e) => updateLine(idx, { replacement_or_new: e.target.value })}
-                        className="border border-gray-300 rounded px-1 py-1 text-xs w-full"
-                      >
+                        className="border border-gray-300 rounded px-1 py-1 text-xs w-full">
                         <option value="">—</option>
                         {REPLACEMENT_OPTIONS.map((o) => <option key={o}>{o}</option>)}
                       </select>
                     </td>
                     <td className="px-3 py-2">
-                      <select
-                        value={line.action_by}
+                      <select value={line.action_by}
                         onChange={(e) => updateLine(idx, { action_by: e.target.value })}
-                        className="border border-gray-300 rounded px-1 py-1 text-xs w-full"
-                      >
+                        className="border border-gray-300 rounded px-1 py-1 text-xs w-full">
                         {ACTION_BY_OPTIONS.map((o) => <option key={o}>{o}</option>)}
                       </select>
                     </td>
                     <td className="px-3 py-2">
-                      <input
-                        type="text"
-                        value={line.comments}
+                      <input type="text" value={line.comments}
                         onChange={(e) => updateLine(idx, { comments: e.target.value })}
-                        className="border border-gray-300 rounded px-1 py-1 text-xs w-full"
-                      />
+                        className="border border-gray-300 rounded px-1 py-1 text-xs w-full" />
                     </td>
-                    <td className="px-3 py-2">
-                      <button
-                        type="button"
-                        onClick={() => removeLine(idx)}
-                        disabled={lines.length === 1}
-                        className="text-red-400 hover:text-red-600 disabled:opacity-30"
-                      >
+                    <td className="px-3 py-2 pt-3">
+                      <button type="button" onClick={() => removeLine(idx)} disabled={lines.length === 1}
+                        className="text-red-400 hover:text-red-600 disabled:opacity-30">
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </td>
@@ -390,21 +391,18 @@ export default function NewIndent() {
             </table>
           </div>
           <div className="px-5 py-3 border-t border-gray-100">
-            <button type="button" onClick={addLine} className="flex items-center gap-1 text-blue-600 text-sm hover:text-blue-800">
+            <button type="button" onClick={addLine}
+              className="flex items-center gap-1 text-blue-600 text-sm hover:text-blue-800">
               <Plus className="w-4 h-4" /> Add Line
             </button>
           </div>
         </div>
 
         <div className="flex justify-end gap-3">
-          <button type="button" onClick={() => navigate(-1)} className="px-4 py-2 border border-gray-300 rounded text-sm hover:bg-gray-50">
-            Cancel
-          </button>
-          <button
-            type="submit"
-            disabled={saving}
-            className="px-6 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-60"
-          >
+          <button type="button" onClick={() => navigate(-1)}
+            className="px-4 py-2 border border-gray-300 rounded text-sm hover:bg-gray-50">Cancel</button>
+          <button type="submit" disabled={saving}
+            className="px-6 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-60">
             {saving ? 'Saving…' : 'Create Indent'}
           </button>
         </div>

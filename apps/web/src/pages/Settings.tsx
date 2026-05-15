@@ -7,32 +7,52 @@ import { Edit2, Trash2, Plus, Save, X, Upload } from 'lucide-react';
 const BASE = import.meta.env.VITE_API_URL ?? '';
 function authHeader(): Record<string, string> { const t = localStorage.getItem('token'); return t ? { Authorization: `Bearer ${t}` } : {}; }
 
-type Tab = 'profile' | 'users' | 'states' | 'financial-years' | 'packaging' | 'agents';
+type Tab = 'profile' | 'users' | 'permissions' | 'states' | 'financial-years' | 'packaging' | 'agents';
+
+const TAB_LABELS: Record<Tab, string> = {
+  profile: 'Profile',
+  users: 'Users',
+  permissions: 'Permissions',
+  states: 'States',
+  'financial-years': 'Financial Years',
+  packaging: 'Packaging Types',
+  agents: 'Agents',
+};
 
 export default function Settings() {
   const { user } = useAuth();
   const [tab, setTab] = useState<Tab>('profile');
+
+  const visibleTabs: Tab[] = [
+    'profile',
+    ...(user?.role === 'admin' ? (['users', 'permissions'] as Tab[]) : []),
+    'states',
+    'financial-years',
+    'packaging',
+    'agents',
+  ];
 
   return (
     <div className="space-y-4">
       <h1 className="text-2xl font-bold text-gray-900">Settings</h1>
 
       <div className="flex border-b border-gray-200 flex-wrap">
-        {(['profile', ...(user?.role === 'admin' ? ['users'] : []), 'states', 'financial-years', 'packaging', 'agents'] as Tab[]).map((t) => (
+        {visibleTabs.map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
-            className={`px-5 py-2 text-sm font-medium border-b-2 capitalize transition-colors ${
+            className={`px-5 py-2 text-sm font-medium border-b-2 transition-colors ${
               tab === t ? 'border-blue-600 text-blue-600' : 'border-transparent text-gray-500 hover:text-gray-700'
             }`}
           >
-            {t === 'financial-years' ? 'Financial Years' : t === 'packaging' ? 'Packaging Types' : t}
+            {TAB_LABELS[t]}
           </button>
         ))}
       </div>
 
       {tab === 'profile' && <ProfileTab />}
       {tab === 'users' && user?.role === 'admin' && <UsersTab />}
+      {tab === 'permissions' && user?.role === 'admin' && <PermissionsTab />}
       {tab === 'states' && <StatesTab />}
       {tab === 'financial-years' && <FYTab />}
       {tab === 'packaging' && <PackagingTab />}
@@ -297,6 +317,83 @@ function AgentsTab() {
                     </td>
                   </>
                 )}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function PermissionsTab() {
+  const ROLES = ['admin', 'manager', 'salesperson', 'factory'] as const;
+  const TABS  = ['sales', 'purchase', 'management'] as const;
+
+  type PermMap = Record<string, Record<string, boolean>>;
+
+  const { data: perms, refetch, isLoading } = useQuery<PermMap>({
+    queryKey: ['tab-permissions'],
+    queryFn: () =>
+      fetch(`${BASE}/api/auth/tab-permissions`, { headers: authHeader() }).then(r => r.json()),
+  });
+
+  const [saving, setSaving] = useState<string | null>(null);
+  const [error, setError]   = useState('');
+
+  const toggle = async (role: string, tab: string, allowed: boolean) => {
+    setSaving(`${role}:${tab}`);
+    setError('');
+    const res = await fetch(`${BASE}/api/auth/tab-permissions`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeader() },
+      body: JSON.stringify({ role, tab, allowed }),
+    });
+    if (!res.ok) {
+      const e = await res.json();
+      setError(e.error ?? 'Failed to update');
+    }
+    await refetch();
+    setSaving(null);
+  };
+
+  if (isLoading) return <div className="text-sm text-gray-400">Loading…</div>;
+
+  return (
+    <div className="space-y-3">
+      <p className="text-sm text-gray-500">
+        Configure which tabs each role can access. Each role must retain at least one tab.
+      </p>
+      {error && <p className="text-xs text-red-600">{error}</p>}
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden max-w-lg">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-gray-50 border-b text-xs text-gray-500 uppercase">
+              <th className="px-4 py-2 text-left">Role</th>
+              {TABS.map(t => (
+                <th key={t} className="px-4 py-2 text-center capitalize">{t}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y">
+            {ROLES.map(role => (
+              <tr key={role}>
+                <td className="px-4 py-2 font-medium capitalize">{role}</td>
+                {TABS.map(tab => {
+                  const checked = perms?.[role]?.[tab] ?? false;
+                  const key = `${role}:${tab}`;
+                  return (
+                    <td key={tab} className="px-4 py-2 text-center">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={saving === key}
+                        onChange={e => toggle(role, tab, e.target.checked)}
+                        className="w-4 h-4 accent-blue-600 cursor-pointer disabled:opacity-50"
+                      />
+                    </td>
+                  );
+                })}
               </tr>
             ))}
           </tbody>

@@ -4,6 +4,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+import sql from './db/client';
 import authRouter from './routes/auth';
 import dashboardRouter from './routes/dashboard';
 import ordersRouter from './routes/orders';
@@ -34,8 +35,32 @@ app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-app.listen(PORT, () => {
-  console.log(`API server running on http://localhost:${PORT}`);
-});
+async function bootstrap() {
+  await sql`
+    CREATE TABLE IF NOT EXISTS role_tab_permissions (
+      role TEXT NOT NULL,
+      tab  TEXT NOT NULL,
+      PRIMARY KEY (role, tab)
+    )
+  `;
+  const existing = await sql`SELECT COUNT(*)::int AS c FROM role_tab_permissions`;
+  if (existing[0].c === 0) {
+    await sql`
+      INSERT INTO role_tab_permissions (role, tab) VALUES
+        ('admin',       'sales'),
+        ('admin',       'purchase'),
+        ('admin',       'management'),
+        ('manager',     'sales'),
+        ('manager',     'purchase'),
+        ('manager',     'management'),
+        ('salesperson', 'sales'),
+        ('factory',     'management')
+    `;
+  }
+}
+
+bootstrap()
+  .then(() => app.listen(PORT, () => console.log(`API server running on http://localhost:${PORT}`)))
+  .catch((err) => { console.error('Bootstrap failed', err); process.exit(1); });
 
 export default app;

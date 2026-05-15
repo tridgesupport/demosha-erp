@@ -6,6 +6,7 @@ export interface AuthUser {
   name: string;
   role: 'admin' | 'manager' | 'salesperson' | 'factory';
   signature_url: string | null;
+  allowed_tabs: string[];
 }
 
 interface AuthContextValue {

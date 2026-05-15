@@ -27,7 +27,9 @@ router.post('/login', async (req: Request, res: Response) => {
     const user = rows[0];
     const valid = await bcrypt.compare(password, user.password_hash);
     if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
-    res.json({ token: signToken(user), user: { user_id: user.user_id, email: user.email, name: user.name, role: user.role, signature_url: user.signature_url } });
+    const tabRows = await sql`SELECT tab FROM role_tab_permissions WHERE role = ${user.role} ORDER BY tab`;
+    const allowed_tabs = tabRows.map((r: any) => r.tab);
+    res.json({ token: signToken(user), user: { user_id: user.user_id, email: user.email, name: user.name, role: user.role, signature_url: user.signature_url, allowed_tabs } });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Login failed' });
@@ -37,7 +39,17 @@ router.post('/login', async (req: Request, res: Response) => {
 // GET /api/auth/me
 router.get('/me', requireAuth, async (req: Request, res: Response) => {
   try {
-    const rows = await sql`SELECT user_id, email, name, role, signature_url FROM users WHERE user_id = ${req.user!.user_id} AND deleted_at IS NULL`;
+    const rows = await sql`
+      SELECT u.user_id, u.email, u.name, u.role, u.signature_url,
+        COALESCE(
+          array_agg(rtp.tab ORDER BY rtp.tab) FILTER (WHERE rtp.tab IS NOT NULL),
+          ARRAY[]::text[]
+        ) AS allowed_tabs
+      FROM users u
+      LEFT JOIN role_tab_permissions rtp ON rtp.role = u.role
+      WHERE u.user_id = ${req.user!.user_id} AND u.deleted_at IS NULL
+      GROUP BY u.user_id, u.email, u.name, u.role, u.signature_url
+    `;
     if (rows.length === 0) return res.status(404).json({ error: 'User not found' });
     res.json(rows[0]);
   } catch (err) {
@@ -143,6 +155,47 @@ router.patch('/users/:id/reset-password', requireAuth, requireRole('admin'), asy
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to reset password' });
+  }
+});
+
+const VALID_ROLES = ['admin', 'manager', 'salesperson', 'factory'];
+const VALID_TABS  = ['sales', 'purchase', 'management'];
+
+// GET /api/auth/tab-permissions  (admin only)
+router.get('/tab-permissions', requireAuth, requireRole('admin'), async (_req: Request, res: Response) => {
+  try {
+    const rows = await sql`SELECT role, tab FROM role_tab_permissions ORDER BY role, tab`;
+    const result: Record<string, Record<string, boolean>> = {};
+    for (const r of VALID_ROLES) {
+      result[r] = {};
+      for (const t of VALID_TABS) result[r][t] = false;
+    }
+    for (const row of rows as any[]) {
+      if (result[row.role]) result[row.role][row.tab] = true;
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch tab permissions' });
+  }
+});
+
+// PATCH /api/auth/tab-permissions  (admin only)
+router.patch('/tab-permissions', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+  const { role, tab, allowed } = req.body;
+  if (!VALID_ROLES.includes(role) || !VALID_TABS.includes(tab)) {
+    return res.status(400).json({ error: 'Invalid role or tab' });
+  }
+  try {
+    if (allowed) {
+      await sql`INSERT INTO role_tab_permissions (role, tab) VALUES (${role}, ${tab}) ON CONFLICT DO NOTHING`;
+    } else {
+      const count = await sql`SELECT COUNT(*)::int AS c FROM role_tab_permissions WHERE role = ${role}`;
+      if (count[0].c <= 1) return res.status(400).json({ error: 'Role must retain at least one tab' });
+      await sql`DELETE FROM role_tab_permissions WHERE role = ${role} AND tab = ${tab}`;
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update tab permission' });
   }
 });
 

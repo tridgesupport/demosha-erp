@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { usePurchaseIndent, useUpdatePurchaseIndentStatus } from '@/hooks/usePurchaseIndents';
+import { usePurchaseIndent, useUpdatePurchaseIndentStatus, useReviseIndent } from '@/hooks/usePurchaseIndents';
 import { useAuth } from '@/context/AuthContext';
 import IndentPdf from '@/components/IndentPdf';
-import { ArrowLeft, CheckCircle, ShoppingCart, Printer, ThumbsUp } from 'lucide-react';
+import { ArrowLeft, CheckCircle, ShoppingCart, Printer, ThumbsUp, RefreshCw } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
@@ -34,6 +34,7 @@ export default function IndentDetail() {
   const { user } = useAuth();
   const { data: indent, isLoading } = usePurchaseIndent(id);
   const updateStatus = useUpdatePurchaseIndentStatus(id!);
+  const revise = useReviseIndent(id!);
   const printRef = useRef<HTMLDivElement>(null);
   const [printing, setPrinting] = useState(false);
 
@@ -44,6 +45,7 @@ export default function IndentDetail() {
   const canApprove = indent?.status === 'submitted' && isManagerOrAdmin;
   const canRaisePO = indent?.status === 'approved';
   const canCancel  = ['draft', 'submitted'].includes(indent?.status ?? '');
+  const canRevise  = indent?.status !== 'cancelled';
 
   const handleStatus = async (status: string) => {
     await updateStatus.mutateAsync(status);
@@ -80,9 +82,22 @@ export default function IndentDetail() {
           <ArrowLeft className="w-5 h-5" />
         </button>
         <h1 className="text-xl font-bold text-gray-900">{indent.indent_number}</h1>
+        {indent.revision_number > 0 && (
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-yellow-100 text-yellow-800">
+            Rev {indent.revision_number}
+          </span>
+        )}
         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[indent.status] ?? 'bg-gray-100 text-gray-600'}`}>
           {STEP_LABELS[indent.status] ?? indent.status}
         </span>
+        {indent.parent_indent_id && (
+          <span className="text-xs text-gray-500">
+            Revised from{' '}
+            <Link to={`/purchase/indents/${indent.parent_indent_id}`} className="text-blue-600 hover:underline">
+              {indent.parent_indent_number ?? 'original'}
+            </Link>
+          </span>
+        )}
         <div className="ml-auto flex gap-2 flex-wrap">
           <button
             onClick={handlePrint}
@@ -117,6 +132,19 @@ export default function IndentDetail() {
             >
               <ShoppingCart className="w-4 h-4" /> Raise PO
             </Link>
+          )}
+          {canRevise && (
+            <button
+              onClick={async () => {
+                const newIndent = await revise.mutateAsync() as any;
+                navigate(`/purchase/indents/${newIndent.indent_id}`);
+              }}
+              disabled={revise.isPending}
+              className="flex items-center gap-1 px-3 py-1.5 border border-gray-300 text-gray-700 rounded text-sm hover:bg-gray-50 disabled:opacity-60"
+            >
+              <RefreshCw className="w-4 h-4" />
+              {revise.isPending ? 'Creating…' : 'Revise'}
+            </button>
           )}
           {canCancel && (
             <button

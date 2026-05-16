@@ -229,6 +229,9 @@ export const updatePurchaseIndent = (id: string, body: unknown) =>
 export const updatePurchaseIndentStatus = (id: string, status: string) =>
   request(`/api/purchase/indents/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
 
+export const reviseIndent = (id: string) =>
+  request(`/api/purchase/indents/${id}/revise`, { method: 'POST' });
+
 // Purchase Orders
 export const fetchPurchaseOrders = (params?: { fyKey?: number; status?: string[]; page?: number }) => {
   const p = new URLSearchParams();

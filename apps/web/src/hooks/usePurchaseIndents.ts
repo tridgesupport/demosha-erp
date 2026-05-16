@@ -45,3 +45,11 @@ export function useUpdatePurchaseIndentStatus(id: string) {
     },
   });
 }
+
+export function useReviseIndent(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.reviseIndent(id),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['purchase-indents'] }),
+  });
+}

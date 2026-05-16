@@ -40,6 +40,7 @@ router.get('/', async (req: Request, res: Response) => {
           i.company, i.indent_for, i.status,
           i.submitted_by, i.submitted_at, i.approved_by, i.approved_at,
           i.remarks, i.created_at, i.updated_at,
+          i.revision_number, i.parent_indent_id,
           fy.fy_label,
           COUNT(l.line_id)::int AS line_count
         FROM purchase_indents i
@@ -84,11 +85,13 @@ router.get('/:id', async (req: Request, res: Response) => {
     const [indentRows, lineRows] = await Promise.all([
       sql`
         SELECT i.*, fy.fy_label,
-          u.signature_url AS approver_signature_url,
-          u.name          AS approver_name
+          u.signature_url  AS approver_signature_url,
+          u.name           AS approver_name,
+          p.indent_number  AS parent_indent_number
         FROM purchase_indents i
         LEFT JOIN lookup_financial_years fy ON fy.fy_key = i.fy_key
-        LEFT JOIN users u ON u.email = i.approved_by AND u.deleted_at IS NULL
+        LEFT JOIN users u               ON u.email = i.approved_by AND u.deleted_at IS NULL
+        LEFT JOIN purchase_indents p    ON p.indent_id = i.parent_indent_id
         WHERE i.indent_id = ${id} AND i.deleted_at IS NULL
       `,
       sql`
@@ -225,6 +228,57 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to update status' });
+  }
+});
+
+router.post('/:id/revise', requireAuth, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const [origRows, lineRows] = await Promise.all([
+      sql`SELECT * FROM purchase_indents WHERE indent_id = ${id} AND deleted_at IS NULL`,
+      sql`SELECT * FROM purchase_indent_lines WHERE indent_id = ${id} ORDER BY line_number`,
+    ]);
+    if (!origRows.length) return res.status(404).json({ error: 'Indent not found' });
+    const original = origRows[0];
+
+    const numRow = await sql`SELECT get_next_indent_number(${original.fy_key}::smallint) AS indent_number`;
+    const indent_number = numRow[0].indent_number;
+    const seq_number = parseInt(indent_number.replace(/\D/g, '').slice(-4), 10) || 0;
+    const revision_number = (original.revision_number ?? 0) + 1;
+    const userEmail = (req as any).user?.email ?? null;
+
+    const newRows = await sql`
+      INSERT INTO purchase_indents
+        (indent_number, fy_key, seq_number, company, indent_date, indent_for, remarks,
+         status, submitted_by, submitted_at,
+         revision_number, parent_indent_id)
+      VALUES
+        (${indent_number}, ${original.fy_key}, ${seq_number},
+         ${original.company}, ${original.indent_date}, ${original.indent_for ?? null},
+         ${original.remarks ?? null},
+         'submitted', ${userEmail}, NOW(),
+         ${revision_number}, ${id})
+      RETURNING *
+    `;
+    const newIndent = newRows[0];
+
+    for (const l of (lineRows as any[])) {
+      await sql`
+        INSERT INTO purchase_indent_lines
+          (indent_id, line_number, item_id, description, unit, quantity, stock_available,
+           goods_required_for, preferred_brand, replacement_or_new, action_by, comments)
+        VALUES
+          (${newIndent.indent_id}, ${l.line_number}, ${l.item_id ?? null}, ${l.description},
+           ${l.unit}, ${l.quantity}, ${l.stock_available ?? null}, ${l.goods_required_for ?? null},
+           ${l.preferred_brand ?? null}, ${l.replacement_or_new ?? null}, ${l.action_by ?? null},
+           ${l.comments ?? null})
+      `;
+    }
+
+    res.status(201).json(newIndent);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create revision' });
   }
 });
 

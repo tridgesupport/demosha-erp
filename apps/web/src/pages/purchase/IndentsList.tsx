@@ -119,7 +119,12 @@ export default function IndentsList() {
                   className="hover:bg-gray-50 cursor-pointer"
                   onClick={() => navigate(`/purchase/indents/${row.indent_id}`)}
                 >
-                  <td className="px-4 py-3 font-medium text-blue-600">{row.indent_number}</td>
+                  <td className="px-4 py-3 font-medium text-blue-600">
+                    {row.indent_number}
+                    {row.revision_number > 0 && (
+                      <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold bg-yellow-100 text-yellow-800">R{row.revision_number}</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">{row.indent_date ? String(row.indent_date).slice(0, 10) : '—'}</td>
                   <td className="px-4 py-3">{row.indent_for ?? '—'}</td>
                   <td className="px-4 py-3">{row.line_count ?? 0}</td>

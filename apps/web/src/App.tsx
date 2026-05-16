@@ -17,6 +17,8 @@ import CustomerDetail from '@/pages/customers/CustomerDetail';
 import Products from '@/pages/catalog/Products';
 import Outstanding from '@/pages/finance/Outstanding';
 import Settings from '@/pages/Settings';
+import SundryDebtors from '@/pages/finance/SundryDebtors';
+import SundryCreditors from '@/pages/finance/SundryCreditors';
 import IndentsList from '@/pages/purchase/IndentsList';
 import NewIndent from '@/pages/purchase/NewIndent';
 import IndentDetail from '@/pages/purchase/IndentDetail';
@@ -31,6 +33,7 @@ const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: st
       { to: '/', label: 'Dashboard', exact: true },
       { to: '/orders', label: 'Orders' },
       { to: '/customers', label: 'Customers' },
+      { to: '/sales/debtors', label: 'Sundry Debtors' },
     ],
   },
   purchase: {
@@ -38,6 +41,7 @@ const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: st
     links: [
       { to: '/purchase/indents', label: 'Indents' },
       { to: '/purchase/orders', label: 'Purchase Orders' },
+      { to: '/purchase/creditors', label: 'Sundry Creditors' },
       { to: '/catalog/products', label: 'Catalog' },
     ],
   },
@@ -220,6 +224,8 @@ export default function App() {
                 <Route path="/customers/:id" element={<CustomerDetail />} />
                 <Route path="/catalog/products" element={<Products />} />
                 <Route path="/finance/outstanding" element={<Outstanding />} />
+                <Route path="/sales/debtors" element={<SundryDebtors />} />
+                <Route path="/purchase/creditors" element={<SundryCreditors />} />
                 <Route path="/settings" element={<Settings />} />
                 <Route path="/purchase/indents" element={<IndentsList />} />
                 <Route path="/purchase/indents/new" element={<NewIndent />} />

@@ -1,13 +1,13 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
   fetchFinancialYears, fetchCustomers, fetchNextPoNumber,
-  fetchPurchaseIndent,
+  fetchPurchaseIndent, fetchPurchaseIndents,
 } from '@/lib/api';
 import { useCreatePurchaseOrder } from '@/hooks/usePurchaseOrders';
 import { format } from 'date-fns';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash2, X, ChevronDown } from 'lucide-react';
 
 const UNITS = ['Nos.', 'MTON', 'Kgs', 'Ltrs', 'Set', 'Pair', 'Mtr', 'Box', 'Roll', 'Sheet', 'Bag', 'Drum', 'Can'];
 const RATE_UNITS = ['PER NO.', 'PER MT', 'PER KG', 'PER LTR', 'PER SET', 'PER MTR', 'PER BOX', 'PER ROLL', 'PER SHEET'];
@@ -27,24 +27,42 @@ function emptyLine(): PoLine {
   return { item_id: null, description: '', unit: 'Nos.', quantity: '', rate: '', rate_unit: 'PER NO.', line_amount: 0 };
 }
 
+function formatDate(d: string | null | undefined) {
+  if (!d) return '';
+  return String(d).slice(0, 10).split('-').reverse().join('/');
+}
+
 export default function NewPurchaseOrder() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const indentIdParam = searchParams.get('indentId');
   const createPO = useCreatePurchaseOrder();
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const { data: fyList = [] } = useQuery({ queryKey: ['financial-years'], queryFn: fetchFinancialYears });
   const currentFy: any = (fyList as any[]).find((f: any) => f.is_current) ?? (fyList as any[])[0];
+
   const { data: customersRes } = useQuery({
     queryKey: ['customers-filter'], queryFn: () => fetchCustomers(undefined, undefined, 1, 500),
   });
   const customers: any[] = customersRes?.data ?? [];
 
+  // Fetch approved indents for the searchable dropdown
+  const { data: approvedIndentsRes } = useQuery({
+    queryKey: ['purchase-indents', 'approved'],
+    queryFn: () => fetchPurchaseIndents({ status: ['approved'] }),
+  });
+  const approvedIndents: any[] = (approvedIndentsRes as any)?.data ?? [];
+
   const [fyKey, setFyKey] = useState<number | null>(null);
   const [orderDate, setOrderDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+
+  // Indent combobox state
   const [indentId, setIndentId] = useState<string | null>(indentIdParam);
-  const [indentNumber, setIndentNumber] = useState('');
+  const [indentSearch, setIndentSearch] = useState('');
+  const [showIndentDrop, setShowIndentDrop] = useState(false);
   const [indentDate, setIndentDate] = useState('');
+
   const [supplierId, setSupplierId] = useState('');
   const [supplierName, setSupplierName] = useState('');
   const [supplierAddress, setSupplierAddress] = useState('');
@@ -76,11 +94,11 @@ export default function NewPurchaseOrder() {
     enabled: !!indentId,
   });
 
+  // Auto-fill form when indent is loaded
   useEffect(() => {
     if (!indent) return;
-    setIndentNumber(indent.indent_number ?? '');
+    setIndentSearch(indent.indent_number ?? '');
     setIndentDate(indent.indent_date ? String(indent.indent_date).slice(0, 10) : '');
-    if (indent.dept) setDept(indent.dept);
     const indentLines: any[] = indent.lines ?? [];
     if (indentLines.length > 0) {
       setLines(indentLines.map((l: any) => ({
@@ -94,6 +112,37 @@ export default function NewPurchaseOrder() {
       })));
     }
   }, [indent]);
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
+        setShowIndentDrop(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const filteredIndents = indentSearch.trim()
+    ? approvedIndents.filter(i =>
+        i.indent_number.toLowerCase().includes(indentSearch.toLowerCase()) ||
+        (i.indent_for ?? '').toLowerCase().includes(indentSearch.toLowerCase())
+      )
+    : approvedIndents;
+
+  const handleIndentSelect = (selected: any) => {
+    setIndentId(selected.indent_id);
+    setIndentSearch(selected.indent_number);
+    setShowIndentDrop(false);
+  };
+
+  const handleIndentClear = () => {
+    setIndentId(null);
+    setIndentSearch('');
+    setIndentDate('');
+    setLines([emptyLine()]);
+  };
 
   const updateLine = (idx: number, patch: Partial<PoLine>) => {
     setLines((prev) => prev.map((l, i) => {
@@ -148,7 +197,7 @@ export default function NewPurchaseOrder() {
         fy_key: fyKey,
         order_date: orderDate,
         indent_id: indentId ?? null,
-        indent_number: indentNumber || null,
+        indent_number: indent?.indent_number || null,
         indent_date: indentDate || null,
         supplier_id: supplierId || null,
         supplier_name: supplierName || null,
@@ -199,8 +248,11 @@ export default function NewPurchaseOrder() {
       )}
 
       {indent && (
-        <div className="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-800">
-          Pre-filled from Indent <strong>{indent.indent_number}</strong>{indent.indent_for ? ` — ${indent.indent_for}` : ''}
+        <div className="bg-blue-50 border border-blue-200 rounded p-3 text-sm text-blue-800 flex items-center gap-2">
+          <span>Pre-filled from Indent <strong>{indent.indent_number}</strong>
+            {indent.indent_for ? ` — ${indent.indent_for}` : ''}
+            {indent.company ? ` (${indent.company})` : ''}
+          </span>
         </div>
       )}
 
@@ -229,11 +281,63 @@ export default function NewPurchaseOrder() {
                 {DEPTS.map((d) => <option key={d}>{d}</option>)}
               </select>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Indent No.</label>
-              <input type="text" value={indentNumber} onChange={(e) => setIndentNumber(e.target.value)}
-                className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+
+            {/* Indent No. — searchable dropdown */}
+            <div className="col-span-2" ref={dropdownRef}>
+              <label className="block text-xs font-medium text-gray-600 mb-1">
+                Indent No. <span className="text-gray-400 font-normal">(approved indents)</span>
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={indentSearch}
+                  onChange={(e) => {
+                    setIndentSearch(e.target.value);
+                    setShowIndentDrop(true);
+                    if (!e.target.value) handleIndentClear();
+                  }}
+                  onFocus={() => setShowIndentDrop(true)}
+                  placeholder="Search indent number or department…"
+                  className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full pr-16"
+                />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  {indentId && (
+                    <button type="button" onClick={handleIndentClear}
+                      className="text-gray-400 hover:text-gray-600 p-0.5">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <ChevronDown className="w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+                </div>
+                {showIndentDrop && (
+                  <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                    {filteredIndents.length === 0 ? (
+                      <div className="px-3 py-4 text-sm text-gray-400 text-center">
+                        {approvedIndents.length === 0 ? 'No approved indents' : 'No matches'}
+                      </div>
+                    ) : (
+                      filteredIndents.map((i: any) => (
+                        <button
+                          key={i.indent_id}
+                          type="button"
+                          onMouseDown={() => handleIndentSelect(i)}
+                          className={`w-full text-left px-3 py-2.5 text-sm hover:bg-blue-50 border-b border-gray-50 last:border-0 flex items-center justify-between gap-4 ${
+                            indentId === i.indent_id ? 'bg-blue-50 text-blue-700' : 'text-gray-800'
+                          }`}
+                        >
+                          <span className="font-medium">{i.indent_number}</span>
+                          <span className="text-xs text-gray-400 shrink-0">
+                            {i.indent_for ?? '—'} &nbsp;·&nbsp; {formatDate(i.indent_date)}
+                            {i.company && i.company !== 'DCPL' ? ` · ${i.company}` : ''}
+                          </span>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
+
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Indent Date</label>
               <input type="date" value={indentDate} onChange={(e) => setIndentDate(e.target.value)}
@@ -286,8 +390,11 @@ export default function NewPurchaseOrder() {
 
         {/* Line Items */}
         <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
-          <div className="px-5 py-3 border-b border-gray-100">
+          <div className="px-5 py-3 border-b border-gray-100 flex items-center justify-between">
             <h2 className="text-sm font-semibold text-gray-700">Items</h2>
+            {indent && (
+              <span className="text-xs text-blue-600">Auto-filled from indent — add rates below</span>
+            )}
           </div>
           <div className="overflow-x-auto">
             <table className="min-w-full text-xs">

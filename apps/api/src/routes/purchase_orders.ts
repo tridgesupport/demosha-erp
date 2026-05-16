@@ -235,25 +235,30 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
     return res.status(403).json({ error: 'Only managers or admins can approve purchase orders' });
   }
 
-  const userEmail = req.user?.email ?? null;
+  const userEmail       = req.user?.email ?? null;
   const isSubmission    = status === 'sent';
   const isApproval      = status === 'approved';
   const isSentToVendor  = status === 'sent_to_vendor';
   const isReceived      = status === 'received';
+  const isCancelled     = status === 'cancelled';
 
   try {
     const rows = await sql`
       UPDATE purchase_orders SET
-        status            = ${status},
-        updated_at        = NOW(),
-        status_changed_at = NOW(),
-        submitted_by   = CASE WHEN ${isSubmission}   THEN ${userEmail} ELSE submitted_by END,
-        submitted_at   = CASE WHEN ${isSubmission}   THEN NOW()        ELSE submitted_at END,
-        approved_by    = CASE WHEN ${isApproval}     THEN ${userEmail} ELSE approved_by END,
-        approved_at    = CASE WHEN ${isApproval}     THEN NOW()        ELSE approved_at END,
-        sent_to_vendor_at = CASE WHEN ${isSentToVendor} THEN NOW()    ELSE sent_to_vendor_at END,
-        grn_number     = CASE WHEN ${isReceived} THEN ${grn_number ?? null} ELSE grn_number END,
-        received_at    = CASE WHEN ${isReceived}     THEN NOW()        ELSE received_at END
+        status              = ${status},
+        updated_at          = NOW(),
+        status_changed_at   = NOW(),
+        submitted_by        = CASE WHEN ${isSubmission}    THEN ${userEmail} ELSE submitted_by END,
+        submitted_at        = CASE WHEN ${isSubmission}    THEN NOW()        ELSE submitted_at END,
+        approved_by         = CASE WHEN ${isApproval}      THEN ${userEmail} ELSE approved_by END,
+        approved_at         = CASE WHEN ${isApproval}      THEN NOW()        ELSE approved_at END,
+        sent_to_vendor_at   = CASE WHEN ${isSentToVendor}  THEN NOW()        ELSE sent_to_vendor_at END,
+        sent_to_vendor_by   = CASE WHEN ${isSentToVendor}  THEN ${userEmail} ELSE sent_to_vendor_by END,
+        grn_number          = CASE WHEN ${isReceived}       THEN ${grn_number ?? null} ELSE grn_number END,
+        received_at         = CASE WHEN ${isReceived}       THEN NOW()        ELSE received_at END,
+        received_by         = CASE WHEN ${isReceived}       THEN ${userEmail} ELSE received_by END,
+        cancelled_by        = CASE WHEN ${isCancelled}      THEN ${userEmail} ELSE cancelled_by END,
+        cancelled_at        = CASE WHEN ${isCancelled}      THEN NOW()        ELSE cancelled_at END
       WHERE order_id = ${id} AND deleted_at IS NULL
       RETURNING *
     `;

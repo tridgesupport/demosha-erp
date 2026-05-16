@@ -203,16 +203,20 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
   const userEmail    = req.user?.email ?? null;
   const isSubmission = status === 'submitted';
   const isApproval   = status === 'approved';
+  const isCancelled  = status === 'cancelled';
 
   try {
     const rows = await sql`
       UPDATE purchase_indents SET
-        status       = ${status},
-        updated_at   = NOW(),
-        submitted_by = CASE WHEN ${isSubmission} THEN ${userEmail} ELSE submitted_by END,
-        submitted_at = CASE WHEN ${isSubmission} THEN NOW()        ELSE submitted_at END,
-        approved_by  = CASE WHEN ${isApproval}   THEN ${userEmail} ELSE approved_by END,
-        approved_at  = CASE WHEN ${isApproval}   THEN NOW()        ELSE approved_at END
+        status            = ${status},
+        updated_at        = NOW(),
+        status_changed_at = NOW(),
+        submitted_by  = CASE WHEN ${isSubmission} THEN ${userEmail} ELSE submitted_by END,
+        submitted_at  = CASE WHEN ${isSubmission} THEN NOW()        ELSE submitted_at END,
+        approved_by   = CASE WHEN ${isApproval}   THEN ${userEmail} ELSE approved_by END,
+        approved_at   = CASE WHEN ${isApproval}   THEN NOW()        ELSE approved_at END,
+        cancelled_by  = CASE WHEN ${isCancelled}  THEN ${userEmail} ELSE cancelled_by END,
+        cancelled_at  = CASE WHEN ${isCancelled}  THEN NOW()        ELSE cancelled_at END
       WHERE indent_id = ${id} AND deleted_at IS NULL
       RETURNING *
     `;

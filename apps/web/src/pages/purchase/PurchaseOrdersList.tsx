@@ -105,7 +105,7 @@ export default function PurchaseOrdersList() {
             <thead className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
               <tr>
                 {[
-                  { key: 'po_number', label: 'PO #' },
+                  { key: 'po_number', label: 'PO # / Rev' },
                   { key: 'order_date', label: 'Date' },
                   { key: 'supplier_name', label: 'Supplier' },
                   { key: null, label: 'Indent #' },
@@ -133,7 +133,12 @@ export default function PurchaseOrdersList() {
                   className="hover:bg-gray-50 cursor-pointer"
                   onClick={() => navigate(`/purchase/orders/${row.order_id}`)}
                 >
-                  <td className="px-4 py-3 font-medium text-blue-600">{row.po_number}</td>
+                  <td className="px-4 py-3 font-medium text-blue-600">
+                    {row.po_number}
+                    {row.revision_number > 0 && (
+                      <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold bg-yellow-100 text-yellow-800">R{row.revision_number}</span>
+                    )}
+                  </td>
                   <td className="px-4 py-3">{row.order_date ? String(row.order_date).slice(0, 10) : '—'}</td>
                   <td className="px-4 py-3">{row.supplier_name ?? '—'}</td>
                   <td className="px-4 py-3 text-gray-500 text-xs">{row.indent_number ?? '—'}</td>

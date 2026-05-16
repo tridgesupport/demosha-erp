@@ -139,6 +139,14 @@ export default function IndentPdf({ indent }: Props) {
         <tbody>
           <tr>
             <td style={{ textAlign: 'center', width: '33%', verticalAlign: 'bottom' }}>
+              {indent.submitted_by && (
+                <div style={{ fontSize: 8, color: '#555', marginBottom: 4 }}>
+                  <div>{indent.submitted_by}</div>
+                  {indent.submitted_at && (
+                    <div>{new Date(indent.submitted_at).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}</div>
+                  )}
+                </div>
+              )}
               <div style={{ borderTop: '1px solid black', paddingTop: 4, fontWeight: 'bold', fontSize: 10 }}>
                 INDENTOR
               </div>
@@ -147,6 +155,22 @@ export default function IndentPdf({ indent }: Props) {
               <div style={{ borderTop: '1px solid black', paddingTop: 4, fontSize: 10 }}>&nbsp;</div>
             </td>
             <td style={{ textAlign: 'center', width: '33%', verticalAlign: 'bottom' }}>
+              {indent.approver_signature_url && (
+                <img
+                  src={indent.approver_signature_url}
+                  alt="signature"
+                  style={{ height: 48, marginBottom: 4 }}
+                  crossOrigin="anonymous"
+                />
+              )}
+              {indent.approved_by && (
+                <div style={{ fontSize: 8, color: '#555', marginBottom: 4 }}>
+                  <div>{indent.approver_name ?? indent.approved_by}</div>
+                  {indent.approved_at && (
+                    <div>{new Date(indent.approved_at).toLocaleString('en-IN', { dateStyle: 'short', timeStyle: 'short' })}</div>
+                  )}
+                </div>
+              )}
               <div style={{ borderTop: '1px solid black', paddingTop: 4, fontWeight: 'bold', fontSize: 10 }}>
                 VICE PRESIDENT
               </div>

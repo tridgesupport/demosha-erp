@@ -9,7 +9,7 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
     const f = req.filters;
     const statusFilter = f.status && f.status.length > 0 ? f.status : null;
 
-    const [filtered, unfiltered, outstanding, recentOrders, overdueAlerts] = await Promise.all([
+    const [filtered, unfiltered, outstanding, recentOrders, overdueAlerts, recentIndents, recentPOs] = await Promise.all([
       sql`
         SELECT
           COUNT(*)::int AS orders_count,
@@ -74,6 +74,25 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
         ORDER BY max_overdue_days DESC
         LIMIT 20
       `,
+      sql`
+        SELECT
+          i.indent_id, i.indent_number, i.indent_date, i.status,
+          i.indent_for, i.company, i.status_changed_at, i.updated_at
+        FROM purchase_indents i
+        WHERE i.deleted_at IS NULL
+        ORDER BY COALESCE(i.status_changed_at, i.updated_at) DESC NULLS LAST, i.seq_number DESC
+        LIMIT 8
+      `,
+      sql`
+        SELECT
+          o.order_id, o.po_number, o.order_date, o.status, o.total_amount,
+          o.supplier_name, o.indent_number, o.revision_number,
+          o.status_changed_at, o.updated_at
+        FROM purchase_orders o
+        WHERE o.deleted_at IS NULL
+        ORDER BY COALESCE(o.status_changed_at, o.updated_at) DESC NULLS LAST, o.seq_number DESC
+        LIMIT 8
+      `,
     ]);
 
     res.json({
@@ -85,6 +104,8 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
       outstandingTotal: outstanding[0].outstanding_total,
       recentOrders,
       overdueAlerts,
+      recentIndents,
+      recentPOs,
     });
   } catch (err) {
     console.error(err);

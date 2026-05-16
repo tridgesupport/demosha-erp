@@ -168,6 +168,22 @@ export const uploadSignature = (userId: string, file: File) => {
   return fetch(`${BASE_URL}/api/auth/users/${userId}/signature`, { method: 'PATCH', headers: getAuthHeader(), body: fd }).then(r => r.json());
 };
 
+// Auth — password & reset flows
+export const forgotPassword = (email: string) =>
+  request<{ success: boolean; reset_url: string | null }>('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) });
+
+export const resetPassword = (token: string, new_password: string) =>
+  request('/api/auth/reset-password', { method: 'POST', body: JSON.stringify({ token, new_password }) });
+
+export const forceChangePassword = (new_password: string) =>
+  request('/api/auth/force-change-password', { method: 'PATCH', body: JSON.stringify({ new_password }) });
+
+export const generateResetLink = (userId: string) =>
+  request<{ reset_url: string }>(`/api/auth/users/${userId}/reset-link`, { method: 'POST' });
+
+export const setMustChangePassword = (userId: string) =>
+  request(`/api/auth/users/${userId}/must-change-password`, { method: 'PATCH' });
+
 export const syncTallyFile = (file: File) => {
   const form = new FormData();
   form.append('file', file);

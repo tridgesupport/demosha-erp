@@ -7,6 +7,7 @@ export interface AuthUser {
   role: 'admin' | 'manager' | 'salesperson' | 'factory';
   signature_url: string | null;
   allowed_tabs: string[];
+  must_change_password: boolean;
 }
 
 interface AuthContextValue {

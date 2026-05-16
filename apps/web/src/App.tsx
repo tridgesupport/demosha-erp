@@ -1,10 +1,14 @@
 import { Routes, Route, NavLink, useLocation, Navigate } from 'react-router-dom';
+import { Settings as SettingsIcon } from 'lucide-react';
 import { Toaster } from '@/components/ui/toaster';
 import { FiltersProvider } from '@/context/FiltersContext';
 import { useAuth } from '@/context/AuthContext';
 import FilterBar from '@/components/FilterBar';
 import Dashboard from '@/pages/Dashboard';
 import Login from '@/pages/Login';
+import ForgotPassword from '@/pages/ForgotPassword';
+import ResetPassword from '@/pages/ResetPassword';
+import ChangePassword from '@/pages/ChangePassword';
 import OrdersList from '@/pages/orders/OrdersList';
 import NewOrder from '@/pages/orders/NewOrder';
 import OrderDetail from '@/pages/orders/OrderDetail';
@@ -41,7 +45,6 @@ const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: st
     label: 'Management',
     links: [
       { to: '/finance/outstanding', label: 'Finance' },
-      { to: '/settings', label: 'Settings' },
     ],
   },
 };
@@ -57,8 +60,13 @@ function getActiveTab(pathname: string): string {
 
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
+  const location = useLocation();
   if (isLoading) return <div className="min-h-screen flex items-center justify-center text-gray-400">Loading…</div>;
   if (!user) return <Navigate to="/login" replace />;
+  // Force password change before accessing anything else
+  if (user.must_change_password && location.pathname !== '/change-password') {
+    return <Navigate to="/change-password" replace />;
+  }
   return <>{children}</>;
 }
 
@@ -70,6 +78,7 @@ function TabGuard({ children }: { children: React.ReactNode }) {
   const activeTab = getActiveTab(location.pathname);
   const allowed = user.allowed_tabs ?? [];
 
+  // Settings (/settings) is always allowed — it's not in TAB_CONFIG so activeTab = ''
   if (activeTab && !allowed.includes(activeTab)) {
     const firstAllowed = Object.keys(TAB_CONFIG).find(t => allowed.includes(t));
     const defaultTo = firstAllowed ? TAB_CONFIG[firstAllowed].links[0].to : '/';
@@ -82,25 +91,36 @@ export default function App() {
   const location = useLocation();
   const { user, logout } = useAuth();
 
-  const hideFilterBar = location.pathname.startsWith('/settings') ||
-    location.pathname === '/orders/new' ||
-    location.pathname.match(/^\/orders\/.+\/edit$/) ||
-    location.pathname === '/login' ||
-    location.pathname === '/purchase/indents/new' ||
-    location.pathname === '/purchase/orders/new';
-
-  if (location.pathname === '/login') {
+  // Public routes rendered without the app shell
+  if (['/login', '/forgot-password', '/reset-password'].some(p => location.pathname.startsWith(p))) {
     return (
       <>
         <Routes>
           <Route path="/login" element={<Login />} />
+          <Route path="/forgot-password" element={<ForgotPassword />} />
+          <Route path="/reset-password" element={<ResetPassword />} />
         </Routes>
         <Toaster />
       </>
     );
   }
 
-  // Fall back to role-based defaults if allowed_tabs is missing/empty (e.g. stale session before API redeploy)
+  // Force-change password page: in shell but no nav (user must act first)
+  if (location.pathname === '/change-password') {
+    return (
+      <RequireAuth>
+        <ChangePassword />
+        <Toaster />
+      </RequireAuth>
+    );
+  }
+
+  const hideFilterBar = location.pathname.startsWith('/settings') ||
+    location.pathname === '/orders/new' ||
+    location.pathname.match(/^\/orders\/.+\/edit$/) ||
+    location.pathname === '/purchase/indents/new' ||
+    location.pathname === '/purchase/orders/new';
+
   const ROLE_DEFAULTS: Record<string, string[]> = {
     admin: ['sales', 'purchase', 'management'],
     manager: ['sales', 'purchase', 'management'],
@@ -110,13 +130,14 @@ export default function App() {
   const allowed = (user?.allowed_tabs?.length ? user.allowed_tabs : (user?.role ? ROLE_DEFAULTS[user.role] ?? [] : []));
   const activeTab = getActiveTab(location.pathname);
   const subLinks = (activeTab && allowed.includes(activeTab)) ? TAB_CONFIG[activeTab]?.links ?? [] : [];
+  const isSettingsActive = location.pathname.startsWith('/settings');
 
   return (
     <RequireAuth>
       <FiltersProvider>
         <div className="min-h-screen bg-gray-50">
           <nav className="bg-white border-b border-gray-200 sticky top-0 z-40">
-            {/* Top row: logo + tabs + user */}
+            {/* Top row: logo + tabs + settings + user */}
             <div className="max-w-screen-2xl mx-auto px-4 flex items-center gap-1 h-12 border-b border-gray-100">
               <span className="font-bold text-blue-700 mr-6 text-lg tracking-tight">Demosha ERP</span>
               <div className="flex items-center gap-0.5 flex-1">
@@ -139,6 +160,18 @@ export default function App() {
                   ))}
               </div>
               <div className="ml-auto flex items-center gap-3">
+                {/* Settings — always visible regardless of tab permissions */}
+                <NavLink
+                  to="/settings"
+                  className={`flex items-center gap-1 px-3 py-1.5 rounded text-sm font-medium transition-colors ${
+                    isSettingsActive
+                      ? 'bg-blue-600 text-white'
+                      : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'
+                  }`}
+                >
+                  <SettingsIcon className="w-4 h-4" />
+                  Settings
+                </NavLink>
                 <span className="text-xs text-gray-500">
                   {user?.name}{' '}
                   <span className="capitalize bg-gray-100 px-1.5 py-0.5 rounded text-gray-600">

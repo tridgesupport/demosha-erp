@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchStates, fetchFinancialYears, setCurrentFY, createFY, fetchPackagingTypes, createPackagingType, updatePackagingType, deletePackagingType, fetchAgents, createAgent, updateAgent, uploadSignature } from '@/lib/api';
+import { fetchStates, fetchFinancialYears, setCurrentFY, createFY, fetchPackagingTypes, createPackagingType, updatePackagingType, deletePackagingType, fetchAgents, createAgent, updateAgent, uploadSignature, generateResetLink, setMustChangePassword } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
-import { Edit2, Trash2, Plus, Save, X, Upload } from 'lucide-react';
+import { Edit2, Trash2, Plus, Save, X, Upload, Copy, Check, RefreshCw } from 'lucide-react';
 
 const BASE = import.meta.env.VITE_API_URL ?? '';
 function authHeader(): Record<string, string> { const t = localStorage.getItem('token'); return t ? { Authorization: `Bearer ${t}` } : {}; }
@@ -23,14 +23,10 @@ export default function Settings() {
   const { user } = useAuth();
   const [tab, setTab] = useState<Tab>('profile');
 
-  const visibleTabs: Tab[] = [
-    'profile',
-    ...(user?.role === 'admin' ? (['users', 'permissions'] as Tab[]) : []),
-    'states',
-    'financial-years',
-    'packaging',
-    'agents',
-  ];
+  // Non-admins only see Profile; admins see everything
+  const visibleTabs: Tab[] = user?.role === 'admin'
+    ? ['profile', 'users', 'permissions', 'states', 'financial-years', 'packaging', 'agents']
+    : ['profile'];
 
   return (
     <div className="space-y-4">
@@ -487,6 +483,9 @@ function UsersTab() {
   const [resetId, setResetId] = useState<string | null>(null);
   const [newPw, setNewPw] = useState('');
   const [savingRoleId, setSavingRoleId] = useState<string | null>(null);
+  const [resetLinks, setResetLinks] = useState<Record<string, string>>({});
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [generatingId, setGeneratingId] = useState<string | null>(null);
 
   const { data: users = [] } = useQuery({
     queryKey: ['admin-users'],
@@ -525,7 +524,29 @@ function UsersTab() {
       method: 'PATCH', headers: { 'Content-Type': 'application/json', ...authHeader() },
       body: JSON.stringify({ new_password: newPw }),
     });
+    qc.invalidateQueries({ queryKey: ['admin-users'] });
     setResetId(null); setNewPw('');
+  };
+
+  const handleGenerateResetLink = async (id: string) => {
+    setGeneratingId(id);
+    try {
+      const data = await generateResetLink(id);
+      setResetLinks(prev => ({ ...prev, [id]: data.reset_url }));
+    } finally {
+      setGeneratingId(null);
+    }
+  };
+
+  const handleCopy = (id: string, url: string) => {
+    navigator.clipboard.writeText(url);
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const handleForcePwChange = async (id: string) => {
+    await setMustChangePassword(id);
+    qc.invalidateQueries({ queryKey: ['admin-users'] });
   };
 
   return (
@@ -543,7 +564,12 @@ function UsersTab() {
           <tbody className="divide-y">
             {(users as any[]).map((u: any) => (
               <tr key={u.user_id}>
-                <td className="px-4 py-2 font-medium">{u.name}</td>
+                <td className="px-4 py-2">
+                  <span className="font-medium">{u.name}</span>
+                  {u.must_change_password && (
+                    <span className="ml-2 text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full">Must change PW</span>
+                  )}
+                </td>
                 <td className="px-4 py-2 text-gray-500">{u.email}</td>
                 <td className="px-4 py-2">
                   <select
@@ -559,20 +585,44 @@ function UsersTab() {
                   </select>
                 </td>
                 <td className="px-4 py-2 text-gray-400">{new Date(u.created_at).toLocaleDateString()}</td>
-                <td className="px-4 py-2 text-right">
-                  <div className="flex gap-2 justify-end">
+                <td className="px-4 py-2">
+                  <div className="flex flex-col gap-1.5 items-end">
                     {resetId === u.user_id ? (
-                      <>
-                        <input type="password" placeholder="New password" className="border border-gray-300 rounded px-2 py-1 text-xs w-28"
+                      <div className="flex gap-1 items-center">
+                        <input type="password" placeholder="New password (min 6)" className="border border-gray-300 rounded px-2 py-1 text-xs w-36"
                           value={newPw} onChange={(e) => setNewPw(e.target.value)} />
                         <button onClick={() => resetPassword(u.user_id)} className="text-xs text-blue-600 hover:underline">Save</button>
                         <button onClick={() => setResetId(null)} className="text-xs text-gray-400 hover:underline">Cancel</button>
-                      </>
+                      </div>
                     ) : (
-                      <>
-                        <button onClick={() => { setResetId(u.user_id); setNewPw(''); }} className="text-xs text-gray-400 hover:text-blue-600">Reset PW</button>
+                      <div className="flex gap-2 items-center">
+                        <button onClick={() => { setResetId(u.user_id); setNewPw(''); }}
+                          className="text-xs text-gray-400 hover:text-blue-600 whitespace-nowrap">Set PW</button>
+                        {!u.must_change_password && (
+                          <button onClick={() => handleForcePwChange(u.user_id)}
+                            title="Flag user to change password on next login"
+                            className="text-gray-400 hover:text-amber-600">
+                            <RefreshCw className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                        <button onClick={() => handleGenerateResetLink(u.user_id)}
+                          disabled={generatingId === u.user_id}
+                          className="text-xs text-gray-400 hover:text-blue-600 whitespace-nowrap disabled:opacity-50">
+                          {generatingId === u.user_id ? 'Generating…' : 'Reset link'}
+                        </button>
                         <button onClick={() => deleteUser(u.user_id)} className="text-gray-400 hover:text-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
-                      </>
+                      </div>
+                    )}
+                    {/* Show generated reset link inline */}
+                    {resetLinks[u.user_id] && resetId !== u.user_id && (
+                      <div className="flex items-center gap-1 max-w-xs">
+                        <input readOnly value={resetLinks[u.user_id]}
+                          className="border border-gray-200 rounded px-1.5 py-0.5 text-xs bg-gray-50 text-gray-500 w-48 truncate" />
+                        <button onClick={() => handleCopy(u.user_id, resetLinks[u.user_id])}
+                          className="text-gray-400 hover:text-green-600">
+                          {copiedId === u.user_id ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
+                        </button>
+                      </div>
                     )}
                   </div>
                 </td>
@@ -583,7 +633,8 @@ function UsersTab() {
       </div>
 
       <div className="bg-white border border-gray-200 rounded-lg p-5 max-w-md">
-        <h2 className="font-semibold text-gray-800 mb-4 text-sm">Add User</h2>
+        <h2 className="font-semibold text-gray-800 mb-1 text-sm">Add User</h2>
+        <p className="text-xs text-gray-400 mb-4">New users will be prompted to set their password on first login.</p>
         <form onSubmit={createUser} className="space-y-3">
           {[['name', 'Full Name', 'text'], ['email', 'Email', 'email'], ['password', 'Temporary Password', 'password']].map(([f, label, type]) => (
             <div key={f}>

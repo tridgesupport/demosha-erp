@@ -1,5 +1,5 @@
 import { useState, FormEvent } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 
 export default function Login() {
@@ -61,6 +61,11 @@ export default function Login() {
           >
             {loading ? 'Signing in…' : 'Sign In'}
           </button>
+          <p className="text-center text-xs text-gray-400">
+            <Link to="/forgot-password" className="text-blue-600 hover:underline">
+              Forgot password?
+            </Link>
+          </p>
         </form>
       </div>
     </div>

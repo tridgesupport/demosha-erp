@@ -9,11 +9,12 @@ import { ArrowLeft, CheckCircle, Printer, Upload, ExternalLink, Truck, Package }
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
-const STATUS_FLOW = ['draft', 'sent', 'approved', 'sent_to_vendor', 'received'];
+const STATUS_FLOW = ['pending_approval', 'approved', 'sent_to_vendor', 'received'];
 
 const STATUS_LABELS: Record<string, string> = {
-  draft: 'Draft',
-  sent: 'Sent for Approval',
+  draft: 'Approval Pending',
+  sent: 'Approval Pending',
+  pending_approval: 'Approval Pending',
   approved: 'Approved',
   sent_to_vendor: 'Sent to Vendor',
   received: 'Received',
@@ -21,8 +22,9 @@ const STATUS_LABELS: Record<string, string> = {
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  draft: 'bg-gray-100 text-gray-700',
-  sent: 'bg-blue-100 text-blue-700',
+  draft: 'bg-amber-100 text-amber-700',
+  sent: 'bg-amber-100 text-amber-700',
+  pending_approval: 'bg-amber-100 text-amber-700',
   approved: 'bg-indigo-100 text-indigo-700',
   sent_to_vendor: 'bg-orange-100 text-orange-700',
   received: 'bg-green-100 text-green-700',
@@ -117,13 +119,14 @@ export default function PurchaseOrderDetail() {
   if (!order) return <div className="text-red-500 p-8">Purchase order not found</div>;
 
   const lines: any[] = order.lines ?? [];
-  const currentStepIdx = STATUS_FLOW.indexOf(order.status);
+  const flowStatus = (order.status === 'draft' || order.status === 'sent') ? 'pending_approval' : order.status;
+  const currentStepIdx = STATUS_FLOW.indexOf(flowStatus);
 
   const canSend         = order.status === 'draft';
-  const canApprove      = order.status === 'sent' && isManagerOrAdmin;
+  const canApprove      = ['pending_approval', 'sent'].includes(order.status) && isManagerOrAdmin;
   const canSendToVendor = order.status === 'approved';
   const canReceive      = order.status === 'sent_to_vendor';
-  const canCancel       = ['draft', 'sent'].includes(order.status);
+  const canCancel       = ['pending_approval', 'draft', 'sent'].includes(order.status);
 
   return (
     <div className="max-w-5xl mx-auto space-y-5 pb-16">
@@ -184,7 +187,7 @@ export default function PurchaseOrderDetail() {
         <div className="flex gap-2 mt-4 flex-wrap">
           {canSend && (
             <button onClick={() => requestStatus('sent')} disabled={updateStatus.isPending}
-              className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-60">
+              className="flex items-center gap-1 px-3 py-1.5 bg-amber-600 text-white rounded text-sm hover:bg-amber-700 disabled:opacity-60">
               <CheckCircle className="w-4 h-4" /> Submit for Approval
             </button>
           )}

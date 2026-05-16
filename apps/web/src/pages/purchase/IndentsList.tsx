@@ -8,7 +8,8 @@ import { fetchFinancialYears } from '@/lib/api';
 
 const INDENT_STATUS_LABELS: Record<string, string> = {
   draft: 'Draft',
-  submitted: 'Submitted',
+  submitted: 'Approval Pending',
+  approved: 'Approved',
   po_raised: 'PO Raised',
   cancelled: 'Cancelled',
 };
@@ -123,9 +124,10 @@ export default function IndentsList() {
                   <td className="px-4 py-3">{row.indent_for ?? '—'}</td>
                   <td className="px-4 py-3">{row.line_count ?? 0}</td>
                   <td className="px-4 py-3">
-                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium capitalize
+                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium
                       ${row.status === 'draft' ? 'bg-gray-100 text-gray-700' : ''}
-                      ${row.status === 'submitted' ? 'bg-blue-100 text-blue-700' : ''}
+                      ${row.status === 'submitted' ? 'bg-amber-100 text-amber-700' : ''}
+                      ${row.status === 'approved' ? 'bg-purple-100 text-purple-700' : ''}
                       ${row.status === 'po_raised' ? 'bg-green-100 text-green-700' : ''}
                       ${row.status === 'cancelled' ? 'bg-red-100 text-red-700' : ''}
                     `}>

@@ -116,12 +116,15 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     const indent_number = numRow[0].indent_number;
     const seq_number = parseInt(indent_number.replace(/\D/g, '').slice(-4), 10) || 0;
 
+    const userEmail = (req as any).user?.email ?? null;
     const indentRows = await sql`
       INSERT INTO purchase_indents
-        (indent_number, fy_key, seq_number, company, indent_date, indent_for, remarks, status)
+        (indent_number, fy_key, seq_number, company, indent_date, indent_for, remarks, status,
+         submitted_by, submitted_at)
       VALUES
         (${indent_number}, ${fy_key}, ${seq_number}, ${company}, ${indent_date},
-         ${indent_for ?? null}, ${remarks ?? null}, 'draft')
+         ${indent_for ?? null}, ${remarks ?? null}, 'submitted',
+         ${userEmail}, NOW())
       RETURNING *
     `;
     const indent = indentRows[0];
@@ -153,7 +156,7 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const check = await sql`SELECT status FROM purchase_indents WHERE indent_id = ${id} AND deleted_at IS NULL`;
     if (!check.length) return res.status(404).json({ error: 'Indent not found' });
-    if (check[0].status !== 'draft') return res.status(400).json({ error: 'Only draft indents can be edited' });
+    if (!['draft', 'submitted'].includes(check[0].status)) return res.status(400).json({ error: 'Only pending-approval indents can be edited' });
 
     const indentRows = await sql`
       UPDATE purchase_indents SET

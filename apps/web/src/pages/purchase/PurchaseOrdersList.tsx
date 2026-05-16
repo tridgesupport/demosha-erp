@@ -6,8 +6,9 @@ import { useQuery } from '@tanstack/react-query';
 import { fetchFinancialYears } from '@/lib/api';
 
 const PO_STATUS_LABELS: Record<string, string> = {
-  draft: 'Draft',
-  sent: 'Sent for Approval',
+  draft: 'Approval Pending',
+  sent: 'Approval Pending',
+  pending_approval: 'Approval Pending',
   approved: 'Approved',
   sent_to_vendor: 'Sent to Vendor',
   received: 'Received',
@@ -15,8 +16,9 @@ const PO_STATUS_LABELS: Record<string, string> = {
 };
 
 const PO_STATUS_COLORS: Record<string, string> = {
-  draft: 'bg-gray-100 text-gray-700',
-  sent: 'bg-blue-100 text-blue-700',
+  draft: 'bg-amber-100 text-amber-700',
+  sent: 'bg-amber-100 text-amber-700',
+  pending_approval: 'bg-amber-100 text-amber-700',
   approved: 'bg-indigo-100 text-indigo-700',
   sent_to_vendor: 'bg-orange-100 text-orange-700',
   received: 'bg-green-100 text-green-700',

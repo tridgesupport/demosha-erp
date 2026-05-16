@@ -7,17 +7,17 @@ import { ArrowLeft, CheckCircle, ShoppingCart, Printer, ThumbsUp } from 'lucide-
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
-const STEPS = ['draft', 'submitted', 'approved', 'po_raised'] as const;
+const STEPS = ['submitted', 'approved', 'po_raised'] as const;
 const STEP_LABELS: Record<string, string> = {
-  draft: 'Draft',
-  submitted: 'Submitted',
+  draft: 'Approval Pending',
+  submitted: 'Approval Pending',
   approved: 'Approved',
   po_raised: 'PO Raised',
 };
 
 const STATUS_COLORS: Record<string, string> = {
-  draft: 'bg-gray-100 text-gray-700',
-  submitted: 'bg-blue-100 text-blue-700',
+  draft: 'bg-amber-100 text-amber-700',
+  submitted: 'bg-amber-100 text-amber-700',
   approved: 'bg-purple-100 text-purple-700',
   po_raised: 'bg-green-100 text-green-700',
   cancelled: 'bg-red-100 text-red-700',
@@ -69,7 +69,8 @@ export default function IndentDetail() {
   if (!indent) return <div className="text-red-500 p-8">Indent not found</div>;
 
   const lines: any[] = indent.lines ?? [];
-  const currentStep = STEPS.indexOf(indent.status as any);
+  const flowStatus = indent.status === 'draft' ? 'submitted' : indent.status;
+  const currentStep = STEPS.indexOf(flowStatus as any);
 
   return (
     <div className="max-w-5xl mx-auto space-y-5 pb-16">

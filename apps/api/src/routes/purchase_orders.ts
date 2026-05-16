@@ -113,6 +113,7 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
     const fy_label = fyRow[0]?.fy_label ?? String(fy_key);
     const po_number = `HO/${fy_label}/P ${seq_number}`;
 
+    const submittedBy = (req as any).user?.email ?? null;
     const orderRows = await sql`
       INSERT INTO purchase_orders (
         po_number, fy_key, seq_number, order_date,
@@ -121,7 +122,8 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         supplier_attn, quotation_ref, dept, delivery_schedule, payment_terms,
         gst_type, gst_rate, freight_terms,
         gross_value, gst_amount, total_amount,
-        notes, status, revision_number, is_cancelled
+        notes, status, revision_number, is_cancelled,
+        submitted_by, submitted_at
       ) VALUES (
         ${po_number}, ${fy_key}, ${seq_number}, ${order_date},
         ${indent_id ?? null}, ${indent_number ?? null}, ${indent_date ?? null},
@@ -131,7 +133,8 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         ${delivery_schedule ?? null}, ${payment_terms ?? null},
         ${gst_type ?? 'CGST_SGST'}, ${gst_rate ?? 0}, ${freight_terms ?? null},
         ${gross_value ?? 0}, ${gst_amount ?? 0}, ${total_amount ?? 0},
-        ${notes ?? null}, 'draft', 0, false
+        ${notes ?? null}, 'pending_approval', 0, false,
+        ${submittedBy}, NOW()
       )
       RETURNING *
     `;
@@ -173,7 +176,7 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
   try {
     const check = await sql`SELECT status FROM purchase_orders WHERE order_id = ${id} AND deleted_at IS NULL`;
     if (!check.length) return res.status(404).json({ error: 'Purchase order not found' });
-    if (check[0].status !== 'draft') return res.status(400).json({ error: 'Only draft POs can be edited' });
+    if (!['draft', 'pending_approval'].includes(check[0].status)) return res.status(400).json({ error: 'Only pending-approval POs can be edited' });
 
     const orderRows = await sql`
       UPDATE purchase_orders SET
@@ -225,7 +228,7 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
 router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => {
   const { id } = req.params;
   const { status, grn_number } = req.body;
-  const VALID = ['sent', 'approved', 'sent_to_vendor', 'received', 'cancelled'];
+  const VALID = ['sent', 'pending_approval', 'approved', 'sent_to_vendor', 'received', 'cancelled'];
   if (!VALID.includes(status)) return res.status(400).json({ error: 'Invalid status' });
 
   if (status === 'approved' && !['admin', 'manager'].includes(req.user?.role?.toLowerCase() ?? '')) {

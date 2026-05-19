@@ -201,6 +201,9 @@ export const createPurchaseDepartment = (dept_name: string) =>
 export const fetchPurchaseItems = (search?: string) =>
   request(`/api/purchase/items/search${search ? `?q=${encodeURIComponent(search)}` : '?q='}`);
 
+export const fetchPurchaseItemGroups = (): Promise<Record<string, string[]>> =>
+  request('/api/purchase/items/groups');
+
 export const createPurchaseItem = (body: unknown) =>
   request('/api/purchase/items', { method: 'POST', body: JSON.stringify(body) });
 

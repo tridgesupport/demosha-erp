@@ -4,12 +4,13 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   fetchFinancialYears, fetchNextIndentNumber, fetchPurchaseItems,
   createPurchaseItem, fetchPurchaseDepartments, createPurchaseDepartment,
+  fetchPurchaseItemGroups,
 } from '@/lib/api';
 import { useCreatePurchaseIndent } from '@/hooks/usePurchaseIndents';
 import { format } from 'date-fns';
 import { Plus, Trash2, Search, ChevronDown } from 'lucide-react';
 
-const UNITS = ['Nos.', 'MTON', 'Kgs', 'Ltrs', 'Set', 'Pair', 'Mtr', 'Box', 'Roll', 'Sheet', 'Bag', 'Drum', 'Can'];
+const UNITS = ['KG', 'NOS', 'LTR', 'MTR', 'GM', 'ML', 'SET', 'KWH', 'SCM', 'Nos.', 'MTON', 'Kgs', 'Ltrs', 'Pair', 'Mtr', 'Box', 'Roll', 'Sheet', 'Bag', 'Drum', 'Can'];
 const ACTION_BY_OPTIONS = ['Valsad', 'Mumbai', 'Both'];
 const REPLACEMENT_OPTIONS = ['Replacement', 'New'];
 
@@ -48,8 +49,15 @@ function ItemSearchCell({ line, idx, onChange }: {
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
   const [newItemName, setNewItemName] = useState('');
-  const [newItemUnit, setNewItemUnit] = useState('Nos.');
+  const [newItemUnit, setNewItemUnit] = useState('KG');
+  const [newItemGroup, setNewItemGroup] = useState('');
+  const [newItemCategory, setNewItemCategory] = useState('');
   const ref = useRef<HTMLDivElement>(null);
+
+  const { data: groups = {} } = useQuery({
+    queryKey: ['purchase-item-groups'],
+    queryFn: fetchPurchaseItemGroups,
+  });
 
   const { data: results = [] } = useQuery({
     queryKey: ['purchase-items-search', query],
@@ -73,11 +81,21 @@ function ItemSearchCell({ line, idx, onChange }: {
 
   const handleCreate = async () => {
     if (!newItemName.trim()) return;
-    const created = await createPurchaseItem({ item_name: newItemName.trim(), default_unit: newItemUnit });
+    const created = await createPurchaseItem({
+      item_name: newItemName.trim(),
+      default_unit: newItemUnit,
+      item_group: newItemGroup || null,
+      category: newItemCategory || null,
+    });
     select(created);
     setCreating(false);
     setNewItemName('');
+    setNewItemGroup('');
+    setNewItemCategory('');
   };
+
+  const groupNames = Object.keys(groups).sort();
+  const categoryNames = newItemGroup ? (groups[newItemGroup] ?? []).sort() : [];
 
   return (
     <div ref={ref} className="relative">
@@ -93,30 +111,56 @@ function ItemSearchCell({ line, idx, onChange }: {
         <Search className="w-4 h-4 text-gray-400 shrink-0" />
       </div>
       {open && (
-        <div className="absolute z-20 bg-white border border-gray-200 rounded shadow-lg mt-1 w-72 max-h-52 overflow-y-auto">
+        <div className="absolute z-20 bg-white border border-gray-200 rounded shadow-lg mt-1 w-80 max-h-64 overflow-y-auto">
           {(results as any[]).map((item: any) => (
             <div key={item.item_id} onMouseDown={() => select(item)}
               className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-sm">
-              <span className="font-medium">{item.item_name}</span>
-              {item.default_unit && <span className="text-gray-400 ml-2 text-xs">({item.default_unit})</span>}
+              <div className="font-medium">{item.item_name}</div>
+              {(item.category || item.item_group) && (
+                <div className="text-xs text-gray-400">{[item.item_group, item.category].filter(Boolean).join(' › ')}</div>
+              )}
+              {item.default_unit && <span className="text-gray-400 text-xs">({item.default_unit})</span>}
             </div>
           ))}
-          <div onMouseDown={() => { setCreating(true); setOpen(false); }}
+          <div onMouseDown={() => { setCreating(true); setNewItemName(query); setOpen(false); }}
             className="px-3 py-2 hover:bg-green-50 cursor-pointer text-sm text-green-700 border-t border-gray-100 flex items-center gap-1">
-            <Plus className="w-3 h-3" /> Create new item "{query}"
+            <Plus className="w-3 h-3" /> Create new item
           </div>
         </div>
       )}
       {creating && (
-        <div className="absolute z-20 bg-white border border-gray-200 rounded shadow-lg mt-1 p-3 w-72 space-y-2">
-          <p className="text-xs font-medium text-gray-700">New Item</p>
-          <input autoFocus value={newItemName || query} onChange={(e) => setNewItemName(e.target.value)}
-            placeholder="Item name" className="border border-gray-300 rounded px-2 py-1 text-sm w-full" />
-          <select value={newItemUnit} onChange={(e) => setNewItemUnit(e.target.value)}
-            className="border border-gray-300 rounded px-2 py-1 text-sm w-full">
-            {UNITS.map((u) => <option key={u}>{u}</option>)}
-          </select>
-          <div className="flex gap-2">
+        <div className="absolute z-20 bg-white border border-gray-200 rounded shadow-lg mt-1 p-3 w-80 space-y-2">
+          <p className="text-xs font-semibold text-gray-700">New Item</p>
+          <div>
+            <label className="text-xs text-gray-500 mb-0.5 block">Group</label>
+            <select value={newItemGroup} onChange={(e) => { setNewItemGroup(e.target.value); setNewItemCategory(''); }}
+              className="border border-gray-300 rounded px-2 py-1 text-xs w-full">
+              <option value="">— Select group —</option>
+              {groupNames.map((g) => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 mb-0.5 block">Category</label>
+            <select value={newItemCategory} onChange={(e) => setNewItemCategory(e.target.value)}
+              disabled={!newItemGroup}
+              className="border border-gray-300 rounded px-2 py-1 text-xs w-full disabled:opacity-50">
+              <option value="">— Select category —</option>
+              {categoryNames.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 mb-0.5 block">Item Name</label>
+            <input autoFocus value={newItemName} onChange={(e) => setNewItemName(e.target.value)}
+              placeholder="Item name" className="border border-gray-300 rounded px-2 py-1 text-xs w-full" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 mb-0.5 block">Unit</label>
+            <select value={newItemUnit} onChange={(e) => setNewItemUnit(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1 text-xs w-full">
+              {UNITS.map((u) => <option key={u}>{u}</option>)}
+            </select>
+          </div>
+          <div className="flex gap-2 pt-1">
             <button onClick={handleCreate} className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">Save</button>
             <button onClick={() => setCreating(false)} className="px-3 py-1 border text-xs rounded">Cancel</button>
           </div>

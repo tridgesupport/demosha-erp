@@ -4,12 +4,13 @@ import { useQuery } from '@tanstack/react-query';
 import {
   fetchFinancialYears, fetchCustomers, fetchNextPoNumber,
   fetchPurchaseIndent, fetchPurchaseIndents,
+  fetchPurchaseItems, fetchPurchaseItemGroups, createPurchaseItem,
 } from '@/lib/api';
 import { useCreatePurchaseOrder } from '@/hooks/usePurchaseOrders';
 import { format } from 'date-fns';
-import { Plus, Trash2, X, ChevronDown } from 'lucide-react';
+import { Plus, Trash2, X, ChevronDown, Search } from 'lucide-react';
 
-const UNITS = ['Nos.', 'MTON', 'Kgs', 'Ltrs', 'Set', 'Pair', 'Mtr', 'Box', 'Roll', 'Sheet', 'Bag', 'Drum', 'Can'];
+const UNITS = ['KG', 'NOS', 'LTR', 'MTR', 'GM', 'ML', 'SET', 'KWH', 'SCM', 'Nos.', 'MTON', 'Kgs', 'Ltrs', 'Pair', 'Mtr', 'Box', 'Roll', 'Sheet', 'Bag', 'Drum', 'Can'];
 const RATE_UNITS = ['PER NO.', 'PER MT', 'PER KG', 'PER LTR', 'PER SET', 'PER MTR', 'PER BOX', 'PER ROLL', 'PER SHEET'];
 const DEPTS = ['STORES', 'MNTC', 'PROJECTS', 'DCL-II', 'WIC', 'LAB', 'ETP', 'DCL-WS'];
 
@@ -30,6 +31,136 @@ function emptyLine(): PoLine {
 function formatDate(d: string | null | undefined) {
   if (!d) return '';
   return String(d).slice(0, 10).split('-').reverse().join('/');
+}
+
+function ItemSearchCell({ line, idx, onChange }: {
+  line: PoLine;
+  idx: number;
+  onChange: (idx: number, patch: Partial<PoLine>) => void;
+}) {
+  const [query, setQuery] = useState(line.description);
+  const [open, setOpen] = useState(false);
+  const [creating, setCreating] = useState(false);
+  const [newItemName, setNewItemName] = useState('');
+  const [newItemUnit, setNewItemUnit] = useState('KG');
+  const [newItemGroup, setNewItemGroup] = useState('');
+  const [newItemCategory, setNewItemCategory] = useState('');
+  const ref = useRef<HTMLDivElement>(null);
+
+  const { data: groups = {} } = useQuery({
+    queryKey: ['purchase-item-groups'],
+    queryFn: fetchPurchaseItemGroups,
+  });
+
+  const { data: results = [] } = useQuery({
+    queryKey: ['purchase-items-search', query],
+    queryFn: () => fetchPurchaseItems(query),
+    enabled: open && query.length >= 1,
+  });
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, []);
+
+  const select = (item: any) => {
+    onChange(idx, { item_id: item.item_id, description: item.item_name, unit: item.default_unit || line.unit });
+    setQuery(item.item_name);
+    setOpen(false);
+  };
+
+  const handleCreate = async () => {
+    if (!newItemName.trim()) return;
+    const created = await createPurchaseItem({
+      item_name: newItemName.trim(),
+      default_unit: newItemUnit,
+      item_group: newItemGroup || null,
+      category: newItemCategory || null,
+    });
+    select(created);
+    setCreating(false);
+    setNewItemName('');
+    setNewItemGroup('');
+    setNewItemCategory('');
+  };
+
+  const groupNames = Object.keys(groups).sort();
+  const categoryNames = newItemGroup ? (groups[newItemGroup] ?? []).sort() : [];
+
+  return (
+    <div ref={ref} className="relative">
+      <div className="flex items-center gap-1">
+        <input
+          type="text"
+          value={query}
+          onChange={(e) => { setQuery(e.target.value); onChange(idx, { description: e.target.value, item_id: null }); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          placeholder="Search or type..."
+          className="border border-gray-300 rounded px-2 py-1 text-xs w-full"
+        />
+        <Search className="w-3.5 h-3.5 text-gray-400 shrink-0" />
+      </div>
+      {open && (
+        <div className="absolute z-20 bg-white border border-gray-200 rounded shadow-lg mt-1 w-80 max-h-64 overflow-y-auto">
+          {(results as any[]).map((item: any) => (
+            <div key={item.item_id} onMouseDown={() => select(item)}
+              className="px-3 py-2 hover:bg-blue-50 cursor-pointer text-xs">
+              <div className="font-medium">{item.item_name}</div>
+              {(item.category || item.item_group) && (
+                <div className="text-gray-400">{[item.item_group, item.category].filter(Boolean).join(' › ')}</div>
+              )}
+              {item.default_unit && <span className="text-gray-400">({item.default_unit})</span>}
+            </div>
+          ))}
+          <div onMouseDown={() => { setCreating(true); setNewItemName(query); setOpen(false); }}
+            className="px-3 py-2 hover:bg-green-50 cursor-pointer text-xs text-green-700 border-t border-gray-100 flex items-center gap-1">
+            <Plus className="w-3 h-3" /> Create new item
+          </div>
+        </div>
+      )}
+      {creating && (
+        <div className="absolute z-20 bg-white border border-gray-200 rounded shadow-lg mt-1 p-3 w-80 space-y-2">
+          <p className="text-xs font-semibold text-gray-700">New Item</p>
+          <div>
+            <label className="text-xs text-gray-500 mb-0.5 block">Group</label>
+            <select value={newItemGroup} onChange={(e) => { setNewItemGroup(e.target.value); setNewItemCategory(''); }}
+              className="border border-gray-300 rounded px-2 py-1 text-xs w-full">
+              <option value="">— Select group —</option>
+              {groupNames.map((g) => <option key={g} value={g}>{g}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 mb-0.5 block">Category</label>
+            <select value={newItemCategory} onChange={(e) => setNewItemCategory(e.target.value)}
+              disabled={!newItemGroup}
+              className="border border-gray-300 rounded px-2 py-1 text-xs w-full disabled:opacity-50">
+              <option value="">— Select category —</option>
+              {categoryNames.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 mb-0.5 block">Item Name</label>
+            <input autoFocus value={newItemName} onChange={(e) => setNewItemName(e.target.value)}
+              placeholder="Item name" className="border border-gray-300 rounded px-2 py-1 text-xs w-full" />
+          </div>
+          <div>
+            <label className="text-xs text-gray-500 mb-0.5 block">Unit</label>
+            <select value={newItemUnit} onChange={(e) => setNewItemUnit(e.target.value)}
+              className="border border-gray-300 rounded px-2 py-1 text-xs w-full">
+              {UNITS.map((u) => <option key={u}>{u}</option>)}
+            </select>
+          </div>
+          <div className="flex gap-2 pt-1">
+            <button onClick={handleCreate} className="px-3 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700">Save</button>
+            <button onClick={() => setCreating(false)} className="px-3 py-1 border text-xs rounded">Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function NewPurchaseOrder() {
@@ -415,12 +546,7 @@ export default function NewPurchaseOrder() {
                   <tr key={idx} className="align-top">
                     <td className="px-3 py-2 text-gray-400">{idx + 1}</td>
                     <td className="px-3 py-2">
-                      <textarea
-                        value={line.description}
-                        onChange={(e) => updateLine(idx, { description: e.target.value })}
-                        rows={2}
-                        className="border border-gray-300 rounded px-1 py-1 text-xs w-full resize-none"
-                      />
+                      <ItemSearchCell line={line} idx={idx} onChange={updateLine} />
                     </td>
                     <td className="px-3 py-2">
                       <select value={line.unit} onChange={(e) => updateLine(idx, { unit: e.target.value })}

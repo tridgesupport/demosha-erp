@@ -39,6 +39,7 @@ const bootstrapped = sql`
       `;
     }
   })
+  .then(() => sql`ALTER TABLE sales_order_lines ADD COLUMN IF NOT EXISTS full_description TEXT`)
   .catch(console.error);
 
 app.use(cors({

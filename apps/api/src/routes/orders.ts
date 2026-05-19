@@ -147,13 +147,13 @@ router.post('/', async (req: Request, res: Response) => {
     const order = orderRows[0];
 
     for (let i = 0; i < lines.length; i++) {
-      const { sku_id, variant_id, qty_kg, rate_per_mt, num_packages, line_amount } = lines[i];
+      const { sku_id, variant_id, full_description, qty_kg, rate_per_mt, num_packages, line_amount } = lines[i];
       await sql`
         INSERT INTO sales_order_lines
-          (order_id, line_number, sku_id, variant_id, num_packages, qty_kg, rate_per_mt, line_amount)
+          (order_id, line_number, sku_id, variant_id, full_description, num_packages, qty_kg, rate_per_mt, line_amount)
         VALUES
           (${order.order_id}, ${i + 1},
-           ${sku_id || null}, ${variant_id || null},
+           ${sku_id || null}, ${variant_id || null}, ${full_description || null},
            ${num_packages ?? 0}, ${qty_kg}, ${rate_per_mt}, ${line_amount ?? 0})
       `;
     }
@@ -200,7 +200,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       sql`
         SELECT
           l.*,
-          COALESCE(cs.pro_forma_product, v.full_description) AS full_description,
+          COALESCE(l.full_description, cs.pro_forma_product, v.full_description) AS full_description,
           COALESCE(cs.grade, v.grade) AS grade,
           COALESCE(cs.qty, v.qty_per_pkg) AS qty_per_pkg,
           p.product_name, p.hs_code,
@@ -279,13 +279,13 @@ router.put('/:id', async (req: Request, res: Response) => {
 
     await sql`DELETE FROM sales_order_lines WHERE order_id = ${id}`;
     for (let i = 0; i < lines.length; i++) {
-      const { sku_id, variant_id, qty_kg, rate_per_mt, num_packages, line_amount } = lines[i];
+      const { sku_id, variant_id, full_description, qty_kg, rate_per_mt, num_packages, line_amount } = lines[i];
       await sql`
         INSERT INTO sales_order_lines
-          (order_id, line_number, sku_id, variant_id, num_packages, qty_kg, rate_per_mt, line_amount)
+          (order_id, line_number, sku_id, variant_id, full_description, num_packages, qty_kg, rate_per_mt, line_amount)
         VALUES
           (${id}, ${i + 1},
-           ${sku_id || null}, ${variant_id || null},
+           ${sku_id || null}, ${variant_id || null}, ${full_description || null},
            ${num_packages ?? 0}, ${qty_kg}, ${rate_per_mt}, ${line_amount ?? 0})
       `;
     }

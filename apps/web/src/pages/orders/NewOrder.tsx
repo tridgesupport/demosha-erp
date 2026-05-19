@@ -6,7 +6,7 @@ import CustomerFormModal from '@/components/CustomerFormModal';
 import { useCreateOrder } from '@/hooks/useOrders';
 import { useStates } from '@/hooks/useCatalog';
 import { calcOrderTotals, determineGstType, formatINR, calcNumPackages, calcLineAmount } from '@/lib/calculations';
-import PiLineItemsTable, { LineItem } from '@/components/PiLineItemsTable';
+import PiLineItemsTable, { LineItem, emptyLineItem } from '@/components/PiLineItemsTable';
 import TotalsSidebar from '@/components/TotalsSidebar';
 import OutstandingWarningBanner from '@/components/OutstandingWarningBanner';
 import { format } from 'date-fns';
@@ -58,7 +58,7 @@ export default function NewOrder() {
   const [cgstRate, setCgstRate] = useState(9);
   const [tcsRate, setTcsRate] = useState(0);
   const [scheduleNotes, setScheduleNotes] = useState('');
-  const [lines, setLines] = useState<LineItem[]>([]);
+  const [lines, setLines] = useState<LineItem[]>([emptyLineItem()]);
 
   const customers: any[] = customerRes?.data ?? [];
 
@@ -154,7 +154,7 @@ export default function NewOrder() {
     if (status === 'sent' && lines.length === 0) errors.push('At least one line item is required');
 
     lines.forEach((l, idx) => {
-      if (!l.sku_id) newLineErrors[idx] = 'Select a SKU';
+      if (!l.full_description.trim()) newLineErrors[idx] = 'Select an item or enter Pro Forma text';
       else if (!l.qty_kg || l.qty_kg <= 0) newLineErrors[idx] = 'Qty must be > 0';
       else if (!l.rate_per_mt || l.rate_per_mt <= 0) newLineErrors[idx] = 'Rate must be > 0';
     });

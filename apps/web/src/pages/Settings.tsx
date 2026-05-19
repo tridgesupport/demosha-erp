@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchStates, fetchFinancialYears, setCurrentFY, createFY, fetchPackagingTypes, createPackagingType, updatePackagingType, deletePackagingType, fetchAgents, createAgent, updateAgent, uploadSignature, generateResetLink, setMustChangePassword } from '@/lib/api';
+import { fetchStates, fetchFinancialYears, setCurrentFY, createFY, fetchPackagingTypes, createPackagingType, updatePackagingType, deletePackagingType, fetchAgents, createAgent, updateAgent, uploadSignature, generateResetLink, setMustChangePassword, fetchRoles, createRole, deleteRole } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { Edit2, Trash2, Plus, Save, X, Upload, Copy, Check, RefreshCw } from 'lucide-react';
 
@@ -323,19 +323,26 @@ function AgentsTab() {
 }
 
 function PermissionsTab() {
-  const ROLES = ['admin', 'manager', 'salesperson', 'factory'] as const;
-  const TABS  = ['sales', 'purchase', 'management'] as const;
+  const TABS = ['sales', 'purchase', 'management'] as const;
+  const qc = useQueryClient();
 
   type PermMap = Record<string, Record<string, boolean>>;
 
   const { data: perms, refetch, isLoading } = useQuery<PermMap>({
     queryKey: ['tab-permissions'],
-    queryFn: () =>
-      fetch(`${BASE}/api/auth/tab-permissions`, { headers: authHeader() }).then(r => r.json()),
+    queryFn: () => fetch(`${BASE}/api/auth/tab-permissions`, { headers: authHeader() }).then(r => r.json()),
+  });
+
+  const { data: roles = [] } = useQuery<string[]>({
+    queryKey: ['roles'],
+    queryFn: fetchRoles,
   });
 
   const [saving, setSaving] = useState<string | null>(null);
-  const [error, setError]   = useState('');
+  const [error, setError] = useState('');
+  const [newRole, setNewRole] = useState('');
+  const [addingRole, setAddingRole] = useState(false);
+  const [deletingRole, setDeletingRole] = useState<string | null>(null);
 
   const toggle = async (role: string, tab: string, allowed: boolean) => {
     setSaving(`${role}:${tab}`);
@@ -345,34 +352,49 @@ function PermissionsTab() {
       headers: { 'Content-Type': 'application/json', ...authHeader() },
       body: JSON.stringify({ role, tab, allowed }),
     });
-    if (!res.ok) {
-      const e = await res.json();
-      setError(e.error ?? 'Failed to update');
-    }
+    if (!res.ok) { const e = await res.json(); setError(e.error ?? 'Failed to update'); }
     await refetch();
     setSaving(null);
+  };
+
+  const handleAddRole = async () => {
+    if (!newRole.trim()) return;
+    setError('');
+    const res = await createRole(newRole.trim()) as any;
+    if (res?.error) { setError(res.error); return; }
+    await Promise.all([refetch(), qc.invalidateQueries({ queryKey: ['roles'] })]);
+    setNewRole('');
+    setAddingRole(false);
+  };
+
+  const handleDeleteRole = async (role: string) => {
+    if (!confirm(`Delete role "${role}"? This cannot be undone.`)) return;
+    setDeletingRole(role);
+    setError('');
+    const res = await deleteRole(role) as any;
+    if (res?.error) { setError(res.error); setDeletingRole(null); return; }
+    await Promise.all([refetch(), qc.invalidateQueries({ queryKey: ['roles'] })]);
+    setDeletingRole(null);
   };
 
   if (isLoading) return <div className="text-sm text-gray-400">Loading…</div>;
 
   return (
-    <div className="space-y-3">
-      <p className="text-sm text-gray-500">
-        Configure which tabs each role can access. Each role must retain at least one tab.
-      </p>
+    <div className="space-y-4">
+      <p className="text-sm text-gray-500">Configure which tabs each role can access.</p>
       {error && <p className="text-xs text-red-600">{error}</p>}
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden max-w-lg">
+
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden max-w-xl">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b text-xs text-gray-500 uppercase">
               <th className="px-4 py-2 text-left">Role</th>
-              {TABS.map(t => (
-                <th key={t} className="px-4 py-2 text-center capitalize">{t}</th>
-              ))}
+              {TABS.map(t => <th key={t} className="px-4 py-2 text-center capitalize">{t}</th>)}
+              <th className="px-4 py-2 w-8"></th>
             </tr>
           </thead>
           <tbody className="divide-y">
-            {ROLES.map(role => (
+            {roles.map(role => (
               <tr key={role}>
                 <td className="px-4 py-2 font-medium capitalize">{role}</td>
                 {TABS.map(tab => {
@@ -380,21 +402,41 @@ function PermissionsTab() {
                   const key = `${role}:${tab}`;
                   return (
                     <td key={tab} className="px-4 py-2 text-center">
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        disabled={saving === key}
+                      <input type="checkbox" checked={checked} disabled={saving === key}
                         onChange={e => toggle(role, tab, e.target.checked)}
-                        className="w-4 h-4 accent-blue-600 cursor-pointer disabled:opacity-50"
-                      />
+                        className="w-4 h-4 accent-blue-600 cursor-pointer disabled:opacity-50" />
                     </td>
                   );
                 })}
+                <td className="px-4 py-2 text-center">
+                  {role !== 'admin' && (
+                    <button onClick={() => handleDeleteRole(role)} disabled={deletingRole === role}
+                      title="Delete role" className="text-gray-300 hover:text-red-500 disabled:opacity-40">
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
+
+      {addingRole ? (
+        <div className="flex items-center gap-2">
+          <input autoFocus value={newRole} onChange={e => setNewRole(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') handleAddRole(); if (e.key === 'Escape') setAddingRole(false); }}
+            placeholder="New role name (e.g. procurement)"
+            className="border border-gray-300 rounded px-3 py-1.5 text-sm w-64" />
+          <button onClick={handleAddRole} className="px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">Add</button>
+          <button onClick={() => { setAddingRole(false); setNewRole(''); }} className="px-3 py-1.5 border rounded text-sm">Cancel</button>
+        </div>
+      ) : (
+        <button onClick={() => setAddingRole(true)}
+          className="flex items-center gap-1 px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50">
+          <Plus className="w-4 h-4" /> Add Role
+        </button>
+      )}
     </div>
   );
 }
@@ -478,6 +520,7 @@ function ProfileTab() {
 
 function UsersTab() {
   const qc = useQueryClient();
+  const { data: roles = [] } = useQuery<string[]>({ queryKey: ['roles'], queryFn: fetchRoles });
   const [form, setForm] = useState({ name: '', email: '', role: 'salesperson', password: '' });
   const [error, setError] = useState('');
   const [resetId, setResetId] = useState<string | null>(null);
@@ -578,10 +621,7 @@ function UsersTab() {
                     disabled={savingRoleId === u.user_id}
                     onChange={(e) => changeRole(u.user_id, e.target.value)}
                   >
-                    <option value="salesperson">Salesperson</option>
-                    <option value="manager">Manager</option>
-                    <option value="factory">Factory</option>
-                    <option value="admin">Admin</option>
+                    {roles.map((r) => <option key={r} value={r} className="capitalize">{r}</option>)}
                   </select>
                 </td>
                 <td className="px-4 py-2 text-gray-400">{new Date(u.created_at).toLocaleDateString()}</td>
@@ -646,10 +686,7 @@ function UsersTab() {
           <div>
             <label className="block text-xs text-gray-500 mb-1">Role</label>
             <select className="input w-full" value={form.role} onChange={(e) => setForm(p => ({ ...p, role: e.target.value }))}>
-              <option value="salesperson">Salesperson</option>
-              <option value="manager">Manager</option>
-              <option value="factory">Factory</option>
-              <option value="admin">Admin</option>
+              {roles.map((r) => <option key={r} value={r} className="capitalize">{r}</option>)}
             </select>
           </div>
           {error && <p className="text-xs text-red-600">{error}</p>}

@@ -197,6 +197,16 @@ export const fetchPurchaseDepartments = () =>
 export const createPurchaseDepartment = (dept_name: string) =>
   request('/api/purchase/indents/departments', { method: 'POST', body: JSON.stringify({ dept_name }) });
 
+// Roles
+export const fetchRoles = (): Promise<string[]> =>
+  request('/api/auth/roles');
+
+export const createRole = (role_name: string) =>
+  request('/api/auth/roles', { method: 'POST', body: JSON.stringify({ role_name }) });
+
+export const deleteRole = (role: string) =>
+  request(`/api/auth/roles/${encodeURIComponent(role)}`, { method: 'DELETE' });
+
 // Purchase Items
 export const fetchPurchaseItems = (search?: string) =>
   request(`/api/purchase/items/search${search ? `?q=${encodeURIComponent(search)}` : '?q='}`);

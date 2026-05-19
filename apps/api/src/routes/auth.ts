@@ -187,7 +187,8 @@ router.post('/register', requireAuth, requireRole('admin'), async (req: Request,
   const { email, name, password } = req.body;
   const role = req.body.role?.toLowerCase();
   if (!email || !name || !role || !password) return res.status(400).json({ error: 'All fields required' });
-  if (!['admin', 'manager', 'salesperson', 'factory'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  const validRoles = await sql`SELECT role_name FROM roles`;
+  if (!validRoles.some((r: any) => r.role_name === role)) return res.status(400).json({ error: 'Invalid role' });
   if (password.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters' });
   try {
     const hash = await bcrypt.hash(password, 10);
@@ -217,7 +218,8 @@ router.delete('/users/:id', requireAuth, requireRole('admin'), async (req: Reque
 // PATCH /api/auth/users/:id/role  (admin only)
 router.patch('/users/:id/role', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
   const role = req.body.role?.toLowerCase();
-  if (!['admin', 'manager', 'salesperson', 'factory'].includes(role)) return res.status(400).json({ error: 'Invalid role' });
+  const validRoles = await sql`SELECT role_name FROM roles`;
+  if (!validRoles.some((r: any) => r.role_name === role)) return res.status(400).json({ error: 'Invalid role' });
   if (req.params.id === req.user!.user_id) return res.status(400).json({ error: 'Cannot change your own role' });
   try {
     await sql`UPDATE users SET role = ${role} WHERE user_id = ${req.params.id} AND deleted_at IS NULL`;
@@ -266,19 +268,59 @@ router.post('/users/:id/reset-link', requireAuth, requireRole('admin'), async (r
   }
 });
 
-const VALID_ROLES = ['admin', 'manager', 'salesperson', 'factory'];
-const VALID_TABS  = ['sales', 'purchase', 'management'];
+const VALID_TABS = ['sales', 'purchase', 'management'];
+
+// GET /api/auth/roles
+router.get('/roles', requireAuth, requireRole('admin'), async (_req: Request, res: Response) => {
+  try {
+    const rows = await sql`SELECT role_name FROM roles ORDER BY role_name`;
+    res.json((rows as any[]).map((r) => r.role_name));
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch roles' });
+  }
+});
+
+// POST /api/auth/roles
+router.post('/roles', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+  const name = req.body.role_name?.toLowerCase().trim().replace(/\s+/g, '_');
+  if (!name) return res.status(400).json({ error: 'role_name is required' });
+  try {
+    await sql`INSERT INTO roles (role_name) VALUES (${name})`;
+    res.status(201).json({ role_name: name });
+  } catch (err: any) {
+    if (err.code === '23505') return res.status(409).json({ error: 'Role already exists' });
+    res.status(500).json({ error: 'Failed to create role' });
+  }
+});
+
+// DELETE /api/auth/roles/:role
+router.delete('/roles/:role', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+  const role = req.params.role;
+  if (role === 'admin') return res.status(400).json({ error: 'Cannot delete the admin role' });
+  try {
+    const users = await sql`SELECT COUNT(*)::int AS c FROM users WHERE role = ${role} AND deleted_at IS NULL`;
+    if (users[0].c > 0) return res.status(400).json({ error: 'Role has assigned users — reassign them first' });
+    await sql`DELETE FROM role_tab_permissions WHERE role = ${role}`;
+    await sql`DELETE FROM roles WHERE role_name = ${role}`;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to delete role' });
+  }
+});
 
 // GET /api/auth/tab-permissions  (admin only)
 router.get('/tab-permissions', requireAuth, requireRole('admin'), async (_req: Request, res: Response) => {
   try {
-    const rows = await sql`SELECT role, tab FROM role_tab_permissions ORDER BY role, tab`;
+    const [roleRows, permRows] = await Promise.all([
+      sql`SELECT role_name FROM roles ORDER BY role_name`,
+      sql`SELECT role, tab FROM role_tab_permissions ORDER BY role, tab`,
+    ]);
     const result: Record<string, Record<string, boolean>> = {};
-    for (const r of VALID_ROLES) {
-      result[r] = {};
-      for (const t of VALID_TABS) result[r][t] = false;
+    for (const r of roleRows as any[]) {
+      result[r.role_name] = {};
+      for (const t of VALID_TABS) result[r.role_name][t] = false;
     }
-    for (const row of rows as any[]) {
+    for (const row of permRows as any[]) {
       if (result[row.role]) result[row.role][row.tab] = true;
     }
     res.json(result);
@@ -290,15 +332,13 @@ router.get('/tab-permissions', requireAuth, requireRole('admin'), async (_req: R
 // PATCH /api/auth/tab-permissions  (admin only)
 router.patch('/tab-permissions', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
   const { role, tab, allowed } = req.body;
-  if (!VALID_ROLES.includes(role) || !VALID_TABS.includes(tab)) {
-    return res.status(400).json({ error: 'Invalid role or tab' });
-  }
+  if (!VALID_TABS.includes(tab)) return res.status(400).json({ error: 'Invalid tab' });
+  const roleRows = await sql`SELECT role_name FROM roles WHERE role_name = ${role}`;
+  if (!roleRows.length) return res.status(400).json({ error: 'Invalid role' });
   try {
     if (allowed) {
       await sql`INSERT INTO role_tab_permissions (role, tab) VALUES (${role}, ${tab}) ON CONFLICT DO NOTHING`;
     } else {
-      const count = await sql`SELECT COUNT(*)::int AS c FROM role_tab_permissions WHERE role = ${role}`;
-      if (count[0].c <= 1) return res.status(400).json({ error: 'Role must retain at least one tab' });
       await sql`DELETE FROM role_tab_permissions WHERE role = ${role} AND tab = ${tab}`;
     }
     res.json({ success: true });

@@ -15,21 +15,27 @@ import purchaseOrdersRouter from './routes/purchase_orders';
 
 const app = express();
 
-// Ensure role_tab_permissions table exists (idempotent on every cold start)
+// Ensure roles + role_tab_permissions tables exist (idempotent on every cold start)
 const bootstrapped = sql`
+  CREATE TABLE IF NOT EXISTS roles (
+    role_name TEXT PRIMARY KEY
+  )
+`.then(() => sql`
   CREATE TABLE IF NOT EXISTS role_tab_permissions (
     role TEXT NOT NULL,
     tab  TEXT NOT NULL,
     PRIMARY KEY (role, tab)
   )
-`.then(() => sql`SELECT COUNT(*)::int AS c FROM role_tab_permissions`)
+`).then(() => sql`SELECT COUNT(*)::int AS c FROM roles`)
   .then(async (rows) => {
     if (rows[0].c === 0) {
+      await sql`INSERT INTO roles (role_name) VALUES ('admin'),('manager'),('salesperson'),('factory') ON CONFLICT DO NOTHING`;
       await sql`
         INSERT INTO role_tab_permissions (role, tab) VALUES
           ('admin','sales'),('admin','purchase'),('admin','management'),
           ('manager','sales'),('manager','purchase'),('manager','management'),
           ('salesperson','sales'),('factory','purchase'),('factory','management')
+        ON CONFLICT DO NOTHING
       `;
     }
   })

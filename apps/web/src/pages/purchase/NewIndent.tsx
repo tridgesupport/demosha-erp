@@ -62,7 +62,7 @@ function ItemSearchCell({ line, idx, onChange }: {
   const { data: results = [] } = useQuery({
     queryKey: ['purchase-items-search', query],
     queryFn: () => fetchPurchaseItems(query),
-    enabled: open && query.length >= 1,
+    enabled: open,
   });
 
   useEffect(() => {

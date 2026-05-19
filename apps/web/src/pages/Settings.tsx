@@ -323,7 +323,7 @@ function AgentsTab() {
 }
 
 function PermissionsTab() {
-  const TABS = ['sales', 'purchase', 'management'] as const;
+  const TABS = ['sales', 'purchase', 'management', 'production', 'inventory'] as const;
   const qc = useQueryClient();
 
   type PermMap = Record<string, Record<string, boolean>>;

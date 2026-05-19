@@ -54,6 +54,10 @@ app.use('/api/purchase/items', purchaseItemsRouter);
 app.use('/api/purchase/indents', purchaseIndentsRouter);
 app.use('/api/purchase/orders', purchaseOrdersRouter);
 
+app.get('/', (_req, res) => {
+  res.json({ status: 'ok', message: 'Open Mercato API' });
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });

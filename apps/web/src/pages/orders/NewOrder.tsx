@@ -1,10 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { fetchFinancialYears, fetchNextPiNumber, fetchAgents, fetchCustomers, fetchVariants as fetchVariantsApi, fetchConsignees, createConsignee } from '@/lib/api';
+import { fetchFinancialYears, fetchNextPiNumber, fetchAgents, fetchCustomers, fetchConsignees, createConsignee } from '@/lib/api';
 import CustomerFormModal from '@/components/CustomerFormModal';
 import { useCreateOrder } from '@/hooks/useOrders';
-import { useProducts, useVariants } from '@/hooks/useCatalog';
 import { useStates } from '@/hooks/useCatalog';
 import { calcOrderTotals, determineGstType, formatINR, calcNumPackages, calcLineAmount } from '@/lib/calculations';
 import PiLineItemsTable, { LineItem } from '@/components/PiLineItemsTable';
@@ -21,7 +20,6 @@ export default function NewOrder() {
   const { data: agents = [] } = useQuery({ queryKey: ['agents'], queryFn: fetchAgents });
   const { data: customerRes } = useQuery({ queryKey: ['customers-filter'], queryFn: () => fetchCustomers(undefined, undefined, 1, 500) });
   const { data: states = [] } = useStates();
-  const { data: products = [] } = useProducts();
 
   const currentFy: any = (fyList as any[]).find((f: any) => f.is_current) ?? (fyList as any[])[0];
 
@@ -79,18 +77,6 @@ export default function NewOrder() {
     queryFn: () => fetchNextPiNumber(fyKey!),
     enabled: fyKey != null,
   });
-
-  // Get all variants from all products for the line items table
-  const [allVariants, setAllVariants] = useState<any[]>([]);
-  useEffect(() => {
-    if ((products as any[]).length === 0) return;
-    (async () => {
-      const variantArrays = await Promise.all(
-        (products as any[]).map((p: any) => fetchVariantsApi(p.product_id))
-      );
-      setAllVariants(variantArrays.flat());
-    })();
-  }, [products]);
 
   const handleBuyerSelect = (id: string) => {
     setBuyerId(id);
@@ -168,7 +154,7 @@ export default function NewOrder() {
     if (status === 'sent' && lines.length === 0) errors.push('At least one line item is required');
 
     lines.forEach((l, idx) => {
-      if (!l.variant_id) newLineErrors[idx] = 'Select a SKU';
+      if (!l.sku_id) newLineErrors[idx] = 'Select a SKU';
       else if (!l.qty_kg || l.qty_kg <= 0) newLineErrors[idx] = 'Qty must be > 0';
       else if (!l.rate_per_mt || l.rate_per_mt <= 0) newLineErrors[idx] = 'Rate must be > 0';
     });
@@ -492,7 +478,7 @@ export default function NewOrder() {
 
           {/* Section 5: Line Items */}
           <Section title="Line Items">
-            <PiLineItemsTable lines={lines} variants={allVariants} onChange={(l) => { setLines(l); setLineErrors({}); }} lineErrors={lineErrors} />
+            <PiLineItemsTable lines={lines} onChange={(l) => { setLines(l); setLineErrors({}); }} lineErrors={lineErrors} />
           </Section>
 
           {/* Validation errors */}

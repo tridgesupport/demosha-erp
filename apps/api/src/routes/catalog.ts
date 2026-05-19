@@ -118,6 +118,46 @@ router.put('/variants/:id', async (req: Request, res: Response) => {
   }
 });
 
+// SKUs (flat catalogue)
+router.get('/skus', async (req: Request, res: Response) => {
+  const q = String(req.query.q ?? '').trim();
+  try {
+    const rows = await sql`
+      SELECT sku_id, legacy_code, item, grade, qty, pkg, pro_forma_product, is_active
+      FROM catalogue_skus
+      WHERE deleted_at IS NULL AND is_active = true
+        AND (${q} = '' OR pro_forma_product ILIKE ${'%' + q + '%'} OR legacy_code::text = ${q})
+      ORDER BY legacy_code
+      LIMIT 100
+    `;
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch SKUs' });
+  }
+});
+
+router.post('/skus', async (req: Request, res: Response) => {
+  const { item, grade, qty, pkg } = req.body;
+  if (!item) return res.status(400).json({ error: 'item is required' });
+  try {
+    const [{ next_code }] = await sql`SELECT COALESCE(MAX(legacy_code), 0) + 1 AS next_code FROM catalogue_skus`;
+    const qtyNum = Number(qty) || 0;
+    const pro_forma_product = qtyNum > 0
+      ? `${item} - ${grade ?? ''} - ${qtyNum} Kg ${pkg ?? ''}`.trim()
+      : `${item} ${grade ?? ''}  ${pkg ?? ''}`.trim();
+    const rows = await sql`
+      INSERT INTO catalogue_skus (legacy_code, item, grade, qty, pkg, pro_forma_product)
+      VALUES (${next_code}, ${item}, ${grade ?? null}, ${qtyNum}, ${pkg ?? null}, ${pro_forma_product})
+      RETURNING *
+    `;
+    res.status(201).json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to create SKU' });
+  }
+});
+
 // Agents
 router.get('/agents', async (_req: Request, res: Response) => {
   try {

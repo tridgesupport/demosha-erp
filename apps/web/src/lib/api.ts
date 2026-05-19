@@ -284,6 +284,15 @@ export const uploadApprovedPo = (orderId: string, file: File) => {
   return fetch(`${BASE_URL}/api/purchase/orders/${orderId}/upload-approved-po`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
 };
 
+// Catalogue SKUs
+export const fetchSkus = (search?: string) => {
+  const p = new URLSearchParams({ q: search ?? '' });
+  return request(`/api/catalog/skus?${p.toString()}`);
+};
+
+export const createSku = (body: unknown) =>
+  request('/api/catalog/skus', { method: 'POST', body: JSON.stringify(body) });
+
 // Lookup
 export const fetchStates = () => request('/api/lookup/states');
 export const fetchFinancialYears = () => request('/api/lookup/financial-years');

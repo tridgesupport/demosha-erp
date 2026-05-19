@@ -147,12 +147,13 @@ router.post('/', async (req: Request, res: Response) => {
     const order = orderRows[0];
 
     for (let i = 0; i < lines.length; i++) {
-      const { variant_id, qty_kg, rate_per_mt, num_packages, line_amount } = lines[i];
+      const { sku_id, variant_id, qty_kg, rate_per_mt, num_packages, line_amount } = lines[i];
       await sql`
         INSERT INTO sales_order_lines
-          (order_id, line_number, variant_id, num_packages, qty_kg, rate_per_mt, line_amount)
+          (order_id, line_number, sku_id, variant_id, num_packages, qty_kg, rate_per_mt, line_amount)
         VALUES
-          (${order.order_id}, ${i + 1}, ${variant_id},
+          (${order.order_id}, ${i + 1},
+           ${sku_id || null}, ${variant_id || null},
            ${num_packages ?? 0}, ${qty_kg}, ${rate_per_mt}, ${line_amount ?? 0})
       `;
     }
@@ -199,10 +200,13 @@ router.get('/:id', async (req: Request, res: Response) => {
       sql`
         SELECT
           l.*,
-          v.full_description, v.grade, v.qty_per_pkg,
+          COALESCE(cs.pro_forma_product, v.full_description) AS full_description,
+          COALESCE(cs.grade, v.grade) AS grade,
+          COALESCE(cs.qty, v.qty_per_pkg) AS qty_per_pkg,
           p.product_name, p.hs_code,
           pt.pkg_name
         FROM sales_order_lines l
+        LEFT JOIN catalogue_skus             cs ON cs.sku_id    = l.sku_id
         LEFT JOIN catalog_product_variants   v  ON v.variant_id = l.variant_id
         LEFT JOIN catalog_products           p  ON p.product_id = v.product_id
         LEFT JOIN lookup_packaging_types     pt ON pt.pkg_id    = v.pkg_id
@@ -275,12 +279,13 @@ router.put('/:id', async (req: Request, res: Response) => {
 
     await sql`DELETE FROM sales_order_lines WHERE order_id = ${id}`;
     for (let i = 0; i < lines.length; i++) {
-      const { variant_id, qty_kg, rate_per_mt, num_packages, line_amount } = lines[i];
+      const { sku_id, variant_id, qty_kg, rate_per_mt, num_packages, line_amount } = lines[i];
       await sql`
         INSERT INTO sales_order_lines
-          (order_id, line_number, variant_id, num_packages, qty_kg, rate_per_mt, line_amount)
+          (order_id, line_number, sku_id, variant_id, num_packages, qty_kg, rate_per_mt, line_amount)
         VALUES
-          (${id}, ${i + 1}, ${variant_id},
+          (${id}, ${i + 1},
+           ${sku_id || null}, ${variant_id || null},
            ${num_packages ?? 0}, ${qty_kg}, ${rate_per_mt}, ${line_amount ?? 0})
       `;
     }

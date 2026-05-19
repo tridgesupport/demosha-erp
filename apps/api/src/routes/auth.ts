@@ -268,7 +268,7 @@ router.post('/users/:id/reset-link', requireAuth, requireRole('admin'), async (r
   }
 });
 
-const VALID_TABS = ['sales', 'purchase', 'management'];
+const VALID_TABS = ['sales', 'purchase', 'management', 'production', 'inventory'];
 
 // GET /api/auth/roles
 router.get('/roles', requireAuth, requireRole('admin'), async (_req: Request, res: Response) => {

@@ -51,6 +51,18 @@ const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: st
       { to: '/finance/outstanding', label: 'Finance' },
     ],
   },
+  production: {
+    label: 'Production',
+    links: [
+      { to: '/production', label: 'Production' },
+    ],
+  },
+  inventory: {
+    label: 'Inventory',
+    links: [
+      { to: '/inventory', label: 'Inventory' },
+    ],
+  },
 };
 
 function getActiveTab(pathname: string): string {
@@ -89,6 +101,15 @@ function TabGuard({ children }: { children: React.ReactNode }) {
     return <Navigate to={defaultTo} replace />;
   }
   return <>{children}</>;
+}
+
+function ComingSoon({ label }: { label: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center py-32 text-gray-400">
+      <p className="text-2xl font-semibold text-gray-300">{label}</p>
+      <p className="text-sm mt-2">Coming soon</p>
+    </div>
+  );
 }
 
 export default function App() {
@@ -233,6 +254,8 @@ export default function App() {
                 <Route path="/purchase/orders" element={<PurchaseOrdersList />} />
                 <Route path="/purchase/orders/new" element={<NewPurchaseOrder />} />
                 <Route path="/purchase/orders/:id" element={<PurchaseOrderDetail />} />
+                <Route path="/production" element={<ComingSoon label="Production" />} />
+                <Route path="/inventory" element={<ComingSoon label="Inventory" />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </TabGuard>

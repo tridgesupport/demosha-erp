@@ -42,15 +42,19 @@ router.get('/', async (_req: Request, res: Response) => {
 });
 
 router.get('/search', async (req: Request, res: Response) => {
-  const q = String(req.query.q ?? '').trim();
+  const q        = String(req.query.q        ?? '').trim();
+  const group    = String(req.query.group    ?? '').trim();
+  const category = String(req.query.category ?? '').trim();
   try {
     const rows = await sql`
       SELECT item_id, item_code, item_name, default_unit, hsn_code, item_group, category
       FROM purchase_items
       WHERE deleted_at IS NULL
-        AND (${q} = '' OR item_name ILIKE ${'%' + q + '%'} OR item_code ILIKE ${'%' + q + '%'})
+        AND (${q}        = '' OR item_name  ILIKE ${'%' + q + '%'} OR item_code ILIKE ${'%' + q + '%'})
+        AND (${group}    = '' OR item_group = ${group})
+        AND (${category} = '' OR category   = ${category})
       ORDER BY item_name
-      LIMIT 30
+      LIMIT 50
     `;
     res.json(rows);
   } catch (err) {

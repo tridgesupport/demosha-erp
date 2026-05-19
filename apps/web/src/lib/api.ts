@@ -208,8 +208,12 @@ export const deleteRole = (role: string) =>
   request(`/api/auth/roles/${encodeURIComponent(role)}`, { method: 'DELETE' });
 
 // Purchase Items
-export const fetchPurchaseItems = (search?: string) =>
-  request(`/api/purchase/items/search${search ? `?q=${encodeURIComponent(search)}` : '?q='}`);
+export const fetchPurchaseItems = (search?: string, group?: string, category?: string) => {
+  const p = new URLSearchParams({ q: search ?? '' });
+  if (group)    p.set('group',    group);
+  if (category) p.set('category', category);
+  return request(`/api/purchase/items/search?${p.toString()}`);
+};
 
 export const fetchPurchaseItemGroups = (): Promise<Record<string, string[]>> =>
   request('/api/purchase/items/groups');

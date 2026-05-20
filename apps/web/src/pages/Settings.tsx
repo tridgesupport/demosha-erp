@@ -449,7 +449,7 @@ function ProfileTab() {
 
   const [localSigUrl, setLocalSigUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
-  const [sigError, setSigError] = useState('');
+  const [sigMsg, setSigMsg] = useState<{ type: 'error' | 'success'; text: string } | null>(null);
 
   const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
   const [pwError, setPwError] = useState('');
@@ -474,19 +474,29 @@ function ProfileTab() {
 
   const handleSignatureUpload = async (file: File) => {
     if (!user) return;
-    setSigError('');
-    // Show local preview immediately
+    setSigMsg(null);
+    // Show local preview immediately so the user sees their image right away
     const localUrl = URL.createObjectURL(file);
     setLocalSigUrl(localUrl);
     setUploading(true);
     try {
-      await uploadSignature(user.user_id, file);
-      await refreshUser();
-      setLocalSigUrl(null); // real URL now in user object
-    } catch {
-      setSigError('Upload failed. Please try again.');
+      const result = await uploadSignature(user.user_id, file);
+      if (result?.error) {
+        setSigMsg({ type: 'error', text: `Upload failed: ${result.error}` });
+        setLocalSigUrl(null);
+        return;
+      }
+      // Use the returned ImageKit URL for the preview
+      if (result?.signature_url) setLocalSigUrl(result.signature_url);
+      setSigMsg({ type: 'success', text: 'Signature saved successfully.' });
+      // Sync auth context so user.signature_url is up to date
+      refreshUser().then(() => setLocalSigUrl(null)).catch(() => {/* keep localSigUrl */});
+    } catch (err: any) {
+      setSigMsg({ type: 'error', text: `Upload failed: ${err?.message ?? 'unknown error'}` });
       setLocalSigUrl(null);
-    } finally { setUploading(false); }
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handlePasswordChange = async (e: React.FormEvent) => {
@@ -536,23 +546,39 @@ function ProfileTab() {
 
       {/* Signature */}
       <div className="bg-white border border-gray-200 rounded-lg p-5">
-        <h2 className="font-semibold text-gray-800 mb-4">Signature</h2>
+        <h2 className="font-semibold text-gray-800 mb-1">Signature</h2>
+        <p className="text-xs text-gray-400 mb-4">
+          Appears as the authorised signatory signature on approved pro forma invoices.
+          {!displaySig && !uploading && ' No signature uploaded yet.'}
+        </p>
+
+        {/* Preview area */}
         {displaySig ? (
-          <div className="mb-3 p-3 border border-gray-100 rounded bg-gray-50 inline-block">
+          <div className="mb-4 p-4 border border-gray-200 rounded-lg bg-gray-50 inline-flex flex-col items-start gap-2">
+            <p className="text-xs text-gray-500 font-medium">Current signature:</p>
             <img src={displaySig} alt="Your signature" className="max-h-20 max-w-xs object-contain" />
-            {uploading && <p className="text-xs text-blue-500 mt-1">Uploading…</p>}
+            {uploading && <p className="text-xs text-blue-500">Saving to server…</p>}
           </div>
-        ) : uploading ? (
-          <div className="mb-3 text-xs text-blue-500">Uploading…</div>
-        ) : null}
-        {sigError && <p className="text-xs text-red-500 mb-2">{sigError}</p>}
+        ) : (
+          <div className="mb-4 p-4 border border-dashed border-gray-300 rounded-lg bg-gray-50 text-sm text-gray-400">
+            {uploading ? 'Uploading…' : 'No signature on file. Upload one below.'}
+          </div>
+        )}
+
+        {/* Status message */}
+        {sigMsg && (
+          <p className={`text-xs mb-3 font-medium ${sigMsg.type === 'success' ? 'text-green-600' : 'text-red-600'}`}>
+            {sigMsg.type === 'success' ? '✓ ' : '✗ '}{sigMsg.text}
+          </p>
+        )}
+
         <label className={`flex items-center gap-2 cursor-pointer px-4 py-2 border border-gray-300 rounded text-sm w-fit hover:bg-gray-50 ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
           <Upload className="w-4 h-4" />
-          {displaySig ? 'Replace Signature' : 'Upload Signature'}
+          {displaySig ? 'Change Signature' : 'Upload Signature'}
           <input type="file" className="hidden" accept=".png,.jpg,.jpeg"
-            onChange={(e) => e.target.files?.[0] && handleSignatureUpload(e.target.files[0])} />
+            onChange={(e) => { if (e.target.files?.[0]) { setSigMsg(null); handleSignatureUpload(e.target.files[0]); } }} />
         </label>
-        <p className="text-xs text-gray-400 mt-1">PNG with transparent background recommended.</p>
+        <p className="text-xs text-gray-400 mt-2">PNG with transparent background recommended.</p>
       </div>
 
       {/* Password */}

@@ -59,6 +59,10 @@ export default function NewOrder() {
   const [tcsRate, setTcsRate] = useState(0);
   const [scheduleNotes, setScheduleNotes] = useState('');
   const [lines, setLines] = useState<LineItem[]>([emptyLineItem()]);
+  const [fieldErrors, setFieldErrors] = useState<Set<string>>(new Set());
+
+  const fe = (name: string) => fieldErrors.has(name) ? '!border-red-400 !bg-red-50' : '';
+  const clearFe = (name: string) => setFieldErrors(prev => { const s = new Set(prev); s.delete(name); return s; });
 
   const customers: any[] = customerRes?.data ?? [];
 
@@ -149,9 +153,12 @@ export default function NewOrder() {
     const errors: string[] = [];
     const newLineErrors: Record<number, string> = {};
 
-    if (!buyerId) errors.push('Buyer is required');
-    if (!buyerPoNumber.trim()) errors.push('Buyer PO Number is required');
-    if (status === 'sent' && lines.length === 0) errors.push('At least one line item is required');
+    const fErrs = new Set<string>();
+    if (!fyKey) { errors.push('Financial year is required'); fErrs.add('fyKey'); }
+    if (!buyerId) { errors.push('Buyer is required'); fErrs.add('buyerId'); }
+    if (!buyerPoNumber.trim()) { errors.push('Buyer PO Number is required'); fErrs.add('buyerPoNumber'); }
+    setFieldErrors(fErrs);
+    if (lines.length === 0) errors.push('At least one line item is required');
 
     lines.forEach((l, idx) => {
       if (!l.full_description.trim()) newLineErrors[idx] = 'Select an item or enter Pro Forma text';
@@ -236,11 +243,11 @@ export default function NewOrder() {
           {/* Section 1: PI Header */}
           <Section title="PI Header">
             <div className="grid grid-cols-4 gap-4">
-              <Field label="Financial Year">
+              <Field label="Financial Year" required>
                 <select
-                  className="input"
+                  className={`input ${fe('fyKey')}`}
                   value={fyKey ?? ''}
-                  onChange={(e) => setFyKey(parseInt(e.target.value, 10))}
+                  onChange={(e) => { setFyKey(parseInt(e.target.value, 10)); clearFe('fyKey'); }}
                 >
                   {(fyList as any[]).map((f: any) => (
                     <option key={f.fy_key} value={f.fy_key}>{f.fy_label}</option>
@@ -269,9 +276,9 @@ export default function NewOrder() {
           {/* Section 2: Bill To */}
           <Section title="Bill To (Buyer)">
             <div className="grid grid-cols-2 gap-4">
-              <Field label="Party Name" className="col-span-2">
+              <Field label="Party Name" className="col-span-2" required>
                 <div className="flex gap-2">
-                  <select className="input flex-1" value={buyerId} onChange={(e) => handleBuyerSelect(e.target.value)}>
+                  <select className={`input flex-1 ${fe('buyerId')}`} value={buyerId} onChange={(e) => { handleBuyerSelect(e.target.value); clearFe('buyerId'); }}>
                     <option value="">Select customer…</option>
                     {customers.map((c) => <option key={c.customer_id} value={c.customer_id}>{c.party_name}</option>)}
                   </select>
@@ -310,8 +317,8 @@ export default function NewOrder() {
               <Field label="Address" className="col-span-2">
                 <textarea className="input" rows={2} value={buyerAddress} onChange={(e) => setBuyerAddress(e.target.value)} />
               </Field>
-              <Field label="Buyer PO Number *">
-                <input className="input" value={buyerPoNumber} required onChange={(e) => setBuyerPoNumber(e.target.value)} />
+              <Field label="Buyer PO Number" required>
+                <input className={`input ${fe('buyerPoNumber')}`} value={buyerPoNumber} onChange={(e) => { setBuyerPoNumber(e.target.value); clearFe('buyerPoNumber'); }} />
               </Field>
               <Field label="Buyer PO Date">
                 <input type="date" className="input" value={buyerOrderDate} onChange={(e) => setBuyerOrderDate(e.target.value)} />
@@ -532,10 +539,12 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   );
 }
 
-function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
+function Field({ label, children, className, required }: { label: string; children: React.ReactNode; className?: string; required?: boolean }) {
   return (
     <div className={className}>
-      <label className="block text-xs font-medium text-gray-500 mb-1">{label}</label>
+      <label className="block text-xs font-medium text-gray-500 mb-1">
+        {label}{required && <span className="text-red-500 ml-0.5">*</span>}
+      </label>
       {children}
     </div>
   );

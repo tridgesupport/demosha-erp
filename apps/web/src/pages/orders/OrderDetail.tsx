@@ -94,23 +94,21 @@ export default function OrderDetail() {
     }
   };
 
+  const prefetchSigAsDataUrl = async (url: string | null | undefined): Promise<string | null> => {
+    if (!url) return null;
+    try {
+      const resp = await fetch(url);
+      const blob = await resp.blob();
+      return await blobToDataUrl(blob);
+    } catch { return null; }
+  };
+
   const generateAndUploadApprovedPdf = async () => {
     if (!approvalRef.current) return;
     setGeneratingPdf(true);
     try {
-      // Pre-fetch signature as data URL so html2canvas can render it without CORS issues
-      let sigDataUrl: string | null = null;
-      if (user?.signature_url) {
-        try {
-          const resp = await fetch(user.signature_url);
-          const sigBlob = await resp.blob();
-          sigDataUrl = await blobToDataUrl(sigBlob);
-        } catch {
-          sigDataUrl = null;
-        }
-      }
+      const sigDataUrl = await prefetchSigAsDataUrl(user?.signature_url);
       setApprovalSigUrl(sigDataUrl);
-      // Wait two animation frames for React to re-render with the new sig URL
       await new Promise<void>(r => requestAnimationFrame(() => { requestAnimationFrame(() => r()); }));
 
       const blob = await generatePdf(approvalRef.current!);
@@ -123,6 +121,38 @@ export default function OrderDetail() {
         method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd,
       });
       queryClient.invalidateQueries({ queryKey: ['order', id] });
+    } catch (err) {
+      console.error('Failed to generate approved PI PDF:', err);
+      setApprovalSigUrl(null);
+    } finally {
+      setGeneratingPdf(false);
+    }
+  };
+
+  const handleDownloadApproved = async () => {
+    const ord = order as any;
+    // If a stored signed PDF exists, open it directly
+    if (ord.approved_pi_url) {
+      window.open(ord.approved_pi_url, '_blank');
+      return;
+    }
+    if (!approvalRef.current) return;
+    setGeneratingPdf(true);
+    try {
+      // Pre-fetch approver signature as base64 so html2canvas can render it without CORS errors
+      const sigDataUrl = await prefetchSigAsDataUrl(ord.approver_signature_url);
+      setApprovalSigUrl(sigDataUrl);
+      // Wait for React to commit the state update to the DOM
+      await new Promise<void>(r => requestAnimationFrame(() => { requestAnimationFrame(() => r()); }));
+      const blob = await generatePdf(approvalRef.current!);
+      setApprovalSigUrl(null);
+      // Trigger a direct file download (avoids popup blocker)
+      const dlUrl = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = dlUrl;
+      a.download = `${ord.pi_number}_approved_proforma.pdf`;
+      a.click();
+      URL.revokeObjectURL(dlUrl);
     } catch (err) {
       console.error('Failed to generate approved PI PDF:', err);
       setApprovalSigUrl(null);
@@ -230,11 +260,11 @@ export default function OrderDetail() {
             <button onClick={handlePrint} disabled={generatingProforma} className="flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50">
               <Printer className="w-4 h-4" /> {generatingProforma ? 'Generating…' : 'Print Pro Forma'}
             </button>
-            {o.approved_pi_url && (
-              <a href={o.approved_pi_url} target="_blank" rel="noopener noreferrer"
-                className="flex items-center gap-1.5 px-4 py-1.5 border border-green-300 text-green-700 rounded text-sm hover:bg-green-50">
-                <FileText className="w-4 h-4" /> Download Approved Pro Forma
-              </a>
+            {['approved', 'sent_to_factory', 'invoiced', 'dispatched'].includes(o.status) && (
+              <button onClick={handleDownloadApproved} disabled={generatingPdf}
+                className="flex items-center gap-1.5 px-4 py-1.5 border border-green-300 text-green-700 rounded text-sm hover:bg-green-50 disabled:opacity-50">
+                <FileText className="w-4 h-4" /> {generatingPdf ? 'Generating…' : 'Download Approved Pro Forma'}
+              </button>
             )}
             {['approved', 'sent_to_factory', 'invoiced', 'dispatched'].includes(o.status) && (
               <label className={`flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 cursor-pointer ${uploading === 'sales-bill' ? 'opacity-50' : ''}`}>
@@ -432,7 +462,7 @@ export default function OrderDetail() {
 
       {/* Hidden approval PDF content — uses pre-fetched base64 sig to avoid html2canvas CORS */}
       <div ref={approvalRef} style={{ display: 'none', position: 'absolute', left: '-9999px', top: 0 }}>
-        <ProformaInvoice order={o} approverName={user?.name} approverSignatureUrl={approvalSigUrl ?? undefined} />
+        <ProformaInvoice order={o} approverName={o.approver_name ?? user?.name} approverSignatureUrl={approvalSigUrl ?? undefined} />
       </div>
     </div>
   );

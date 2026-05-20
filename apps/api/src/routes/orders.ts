@@ -26,7 +26,8 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
           o.consignee_id, c.party_name AS consignee_name,
           o.agent_id,    a.agent_name,
           o.total_amount, o.is_cancelled, o.revision_number,
-          o.status_changed_at, o.submitted_at, o.submitted_by,
+          o.submitted_at, o.submitted_by, o.approved_at, o.approved_by,
+          o.invoiced_at, o.dispatched_at,
           fy.fy_label,
           COUNT(ol.line_id)::int AS line_count
         FROM sales_orders o

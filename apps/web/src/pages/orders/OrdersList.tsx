@@ -6,7 +6,7 @@ import { formatINR } from '@/lib/calculations';
 import StatusBadge from '@/components/StatusBadge';
 import { Plus, Download, ChevronUp, ChevronDown } from 'lucide-react';
 
-type SortKey = 'pi_number' | 'order_date' | 'buyer_name' | 'agent_name' | 'total_amount' | 'status' | 'submitted_at' | 'status_changed_at';
+type SortKey = 'pi_number' | 'order_date' | 'buyer_name' | 'agent_name' | 'total_amount' | 'status' | 'submitted_at';
 
 export default function OrdersList() {
   const { filters } = useFiltersContext();
@@ -107,8 +107,7 @@ export default function OrdersList() {
                   ['agent_name', 'Agent'],
                   ['total_amount', 'Total (INR)'],
                   ['status', 'Status'],
-                  ['submitted_at', 'Submitted'],
-                  ['status_changed_at', 'Last Update'],
+                  ['submitted_at', 'Status Date'],
                 ] as [SortKey, string][]).map(([key, label]) => (
                   <th
                     key={key}
@@ -125,14 +124,14 @@ export default function OrdersList() {
               {isLoading ? (
                 [...Array(10)].map((_, i) => (
                   <tr key={i}>
-                    <td colSpan={10} className="px-4 py-3">
+                    <td colSpan={9} className="px-4 py-3">
                       <div className="h-4 bg-gray-200 rounded animate-pulse" />
                     </td>
                   </tr>
                 ))
               ) : displayed.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
                     No orders found
                   </td>
                 </tr>
@@ -151,11 +150,25 @@ export default function OrdersList() {
                     <td className="px-4 py-2.5 text-right font-medium">{formatINR(o.total_amount)}</td>
                     <td className="px-4 py-2.5"><StatusBadge status={o.status} /></td>
                     <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">
-                      {o.submitted_at ? new Date(o.submitted_at).toLocaleString() : '—'}
-                      {o.submitted_by && <span className="block text-gray-400">{o.submitted_by.split('@')[0]}</span>}
-                    </td>
-                    <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">
-                      {o.status_changed_at ? new Date(o.status_changed_at).toLocaleString() : '—'}
+                      {(() => {
+                        const ts =
+                          o.status === 'sent'            ? o.submitted_at  :
+                          o.status === 'approved'        ? o.approved_at   :
+                          o.status === 'sent_to_factory' ? o.approved_at   :
+                          o.status === 'invoiced'        ? o.invoiced_at   :
+                          o.status === 'dispatched'      ? o.dispatched_at :
+                          o.submitted_at;
+                        const by =
+                          o.status === 'sent'     ? o.submitted_by :
+                          o.status === 'approved' || o.status === 'sent_to_factory' ? o.approved_by :
+                          null;
+                        return ts ? (
+                          <>
+                            {new Date(ts).toLocaleString()}
+                            {by && <span className="block text-gray-400">{by.split('@')[0]}</span>}
+                          </>
+                        ) : '—';
+                      })()}
                     </td>
                     <td className="px-4 py-2.5 text-right text-gray-500">{o.line_count}</td>
                   </tr>

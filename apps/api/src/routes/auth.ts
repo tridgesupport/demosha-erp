@@ -171,9 +171,10 @@ router.patch('/users/:id/signature', requireAuth, upload.single('file') as any, 
     const { url, fileId } = await uploadToImagekit(req.file.buffer, `sig_${req.params.id}`, 'signatures');
     await sql`UPDATE users SET signature_url = ${url}, signature_file_id = ${fileId} WHERE user_id = ${req.params.id}`;
     res.json({ signature_url: url });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to upload signature' });
+  } catch (err: any) {
+    const detail = err?.message ?? String(err);
+    console.error('Signature upload failed:', detail);
+    res.status(500).json({ error: `Upload failed: ${detail}` });
   }
 });
 

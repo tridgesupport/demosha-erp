@@ -4,7 +4,7 @@ import { fetchStates, fetchFinancialYears, setCurrentFY, createFY, fetchPackagin
 import { useAuth } from '@/context/AuthContext';
 import { Edit2, Trash2, Plus, Save, X, Upload, Copy, Check, RefreshCw } from 'lucide-react';
 
-const BASE = import.meta.env.VITE_API_URL ?? '';
+const BASE = (import.meta.env.VITE_API_URL ?? '').trim();
 function authHeader(): Record<string, string> { const t = localStorage.getItem('token'); return t ? { Authorization: `Bearer ${t}` } : {}; }
 
 type Tab = 'profile' | 'users' | 'permissions' | 'states' | 'financial-years' | 'packaging' | 'agents';

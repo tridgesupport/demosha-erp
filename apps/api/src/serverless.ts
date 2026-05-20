@@ -40,6 +40,7 @@ const bootstrapped = sql`
     }
   })
   .then(() => sql`ALTER TABLE sales_order_lines ADD COLUMN IF NOT EXISTS full_description TEXT`)
+  .then(() => sql`ALTER TABLE sales_order_lines ALTER COLUMN variant_id DROP NOT NULL`)
   .catch(console.error);
 
 app.use(cors({

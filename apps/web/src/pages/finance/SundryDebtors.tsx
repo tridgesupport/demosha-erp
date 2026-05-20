@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFiltersContext } from '@/context/FiltersContext';
 import { useOutstanding, useOutstandingSummary } from '@/hooks/useFinance';
@@ -7,9 +8,14 @@ import OverdueBadge from '@/components/OverdueBadge';
 export default function SundryDebtors() {
   const { filters } = useFiltersContext();
   const navigate = useNavigate();
+  const [gstinFilter, setGstinFilter] = useState('');
   const { data: summary } = useOutstandingSummary('debtor');
   const { data: rows = [], isLoading } = useOutstanding('debtor', filters);
   const s = summary as any;
+
+  const displayed = gstinFilter.trim()
+    ? (rows as any[]).filter(r => (r.gstin ?? '').toLowerCase().includes(gstinFilter.trim().toLowerCase()))
+    : (rows as any[]);
 
   return (
     <div className="space-y-4">
@@ -28,6 +34,19 @@ export default function SundryDebtors() {
             <p className="text-xl font-bold mt-1">{formatINR(value)}</p>
           </div>
         ))}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          placeholder="Filter by GSTIN…"
+          value={gstinFilter}
+          onChange={e => setGstinFilter(e.target.value)}
+          className="border border-gray-300 rounded px-3 py-1.5 text-sm w-56 focus:outline-none focus:ring-1 focus:ring-blue-500 font-mono"
+        />
+        {gstinFilter && (
+          <button onClick={() => setGstinFilter('')} className="text-xs text-gray-400 hover:text-gray-600">Clear</button>
+        )}
       </div>
 
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
@@ -52,10 +71,10 @@ export default function SundryDebtors() {
                     <div className="h-4 bg-gray-200 rounded animate-pulse" />
                   </td></tr>
                 ))
-              ) : (rows as any[]).length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No outstanding records</td></tr>
+              ) : displayed.length === 0 ? (
+                <tr><td colSpan={8} className="px-4 py-8 text-center text-gray-400">No outstanding records{gstinFilter ? ` matching "${gstinFilter}"` : ''}</td></tr>
               ) : (
-                (rows as any[]).map((r) => {
+                displayed.map((r) => {
                   const rowBg = r.max_overdue_days >= 90 ? 'bg-red-50' : r.max_overdue_days >= 60 ? 'bg-orange-50' : r.max_overdue_days >= 30 ? 'bg-yellow-50' : '';
                   return (
                     <tr key={r.customer_id}

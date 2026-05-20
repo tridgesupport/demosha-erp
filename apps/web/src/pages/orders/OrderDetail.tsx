@@ -33,10 +33,19 @@ export default function OrderDetail() {
   const [uploading, setUploading] = useState<string | null>(null);
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [generatingProforma, setGeneratingProforma] = useState(false);
+  const [approvalSigUrl, setApprovalSigUrl] = useState<string | null>(null);
 
   const buyerOutstanding = useCustomerOutstanding(order?.buyer_id);
   const printRef = useRef<HTMLDivElement>(null);
   const approvalRef = useRef<HTMLDivElement>(null);
+
+  const blobToDataUrl = (blob: Blob): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
 
   const generatePdf = async (el: HTMLDivElement): Promise<Blob> => {
     el.style.display = 'block';
@@ -61,6 +70,11 @@ export default function OrderDetail() {
   };
 
   const handlePrint = async () => {
+    const o2 = order as any;
+    if (['approved', 'sent_to_factory', 'invoiced', 'dispatched'].includes(o2?.status) && o2?.approved_pi_url) {
+      window.open(o2.approved_pi_url, '_blank');
+      return;
+    }
     if (!printRef.current) return;
     setGeneratingProforma(true);
     try {
@@ -89,7 +103,24 @@ export default function OrderDetail() {
     if (!approvalRef.current) return;
     setGeneratingPdf(true);
     try {
-      const blob = await generatePdf(approvalRef.current);
+      // Pre-fetch signature as data URL so html2canvas can render it without CORS issues
+      let sigDataUrl: string | null = null;
+      if (user?.signature_url) {
+        try {
+          const resp = await fetch(user.signature_url);
+          const sigBlob = await resp.blob();
+          sigDataUrl = await blobToDataUrl(sigBlob);
+        } catch {
+          sigDataUrl = null;
+        }
+      }
+      setApprovalSigUrl(sigDataUrl);
+      // Wait two animation frames for React to re-render with the new sig URL
+      await new Promise<void>(r => requestAnimationFrame(() => { requestAnimationFrame(() => r()); }));
+
+      const blob = await generatePdf(approvalRef.current!);
+      setApprovalSigUrl(null);
+
       const fd = new FormData();
       fd.append('file', blob, 'approved_pi.pdf');
       const token = localStorage.getItem('token');
@@ -99,6 +130,7 @@ export default function OrderDetail() {
       queryClient.invalidateQueries({ queryKey: ['order', id] });
     } catch (err) {
       console.error('Failed to generate approved PI PDF:', err);
+      setApprovalSigUrl(null);
     } finally {
       setGeneratingPdf(false);
     }
@@ -397,9 +429,9 @@ export default function OrderDetail() {
         <ProformaInvoice order={o} />
       </div>
 
-      {/* Hidden approval PDF content — uses current user's signature */}
+      {/* Hidden approval PDF content — uses pre-fetched base64 sig to avoid html2canvas CORS */}
       <div ref={approvalRef} style={{ display: 'none', position: 'absolute', left: '-9999px', top: 0 }}>
-        <ProformaInvoice order={o} approverName={user?.name} approverSignatureUrl={user?.signature_url} />
+        <ProformaInvoice order={o} approverName={user?.name} approverSignatureUrl={approvalSigUrl ?? undefined} />
       </div>
     </div>
   );

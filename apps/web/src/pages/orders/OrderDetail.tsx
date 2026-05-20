@@ -70,11 +70,6 @@ export default function OrderDetail() {
   };
 
   const handlePrint = async () => {
-    const o2 = order as any;
-    if (['approved', 'sent_to_factory', 'invoiced', 'dispatched'].includes(o2?.status) && o2?.approved_pi_url) {
-      window.open(o2.approved_pi_url, '_blank');
-      return;
-    }
     if (!printRef.current) return;
     setGeneratingProforma(true);
     try {
@@ -235,6 +230,12 @@ export default function OrderDetail() {
             <button onClick={handlePrint} disabled={generatingProforma} className="flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50">
               <Printer className="w-4 h-4" /> {generatingProforma ? 'Generating…' : 'Print Pro Forma'}
             </button>
+            {o.approved_pi_url && (
+              <a href={o.approved_pi_url} target="_blank" rel="noopener noreferrer"
+                className="flex items-center gap-1.5 px-4 py-1.5 border border-green-300 text-green-700 rounded text-sm hover:bg-green-50">
+                <FileText className="w-4 h-4" /> Download Approved Pro Forma
+              </a>
+            )}
             {['approved', 'sent_to_factory', 'invoiced', 'dispatched'].includes(o.status) && (
               <label className={`flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 cursor-pointer ${uploading === 'sales-bill' ? 'opacity-50' : ''}`}>
                 <Upload className="w-4 h-4" />

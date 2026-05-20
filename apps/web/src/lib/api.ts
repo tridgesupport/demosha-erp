@@ -169,6 +169,9 @@ export const uploadSignature = (userId: string, file: File) => {
 };
 
 // Auth — password & reset flows
+export const updateProfile = (name: string) =>
+  request('/api/auth/profile', { method: 'PATCH', body: JSON.stringify({ name }) });
+
 export const forgotPassword = (email: string) =>
   request<{ success: boolean; reset_url: string | null }>('/api/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) });
 

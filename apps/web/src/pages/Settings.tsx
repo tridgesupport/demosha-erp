@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { fetchStates, fetchFinancialYears, setCurrentFY, createFY, fetchPackagingTypes, createPackagingType, updatePackagingType, deletePackagingType, fetchAgents, createAgent, updateAgent, uploadSignature, generateResetLink, setMustChangePassword, fetchRoles, createRole, deleteRole } from '@/lib/api';
+import { fetchStates, fetchFinancialYears, setCurrentFY, createFY, fetchPackagingTypes, createPackagingType, updatePackagingType, deletePackagingType, fetchAgents, createAgent, updateAgent, uploadSignature, generateResetLink, setMustChangePassword, fetchRoles, createRole, deleteRole, updateProfile } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
 import { Edit2, Trash2, Plus, Save, X, Upload, Copy, Check, RefreshCw } from 'lucide-react';
 
@@ -443,18 +443,49 @@ function PermissionsTab() {
 
 function ProfileTab() {
   const { user, refreshUser } = useAuth();
-  const qc = useQueryClient();
+  const [editName, setEditName] = useState(user?.name ?? '');
+  const [savingProfile, setSavingProfile] = useState(false);
+  const [profileMsg, setProfileMsg] = useState('');
+
+  const [localSigUrl, setLocalSigUrl] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
+  const [sigError, setSigError] = useState('');
+
   const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
   const [pwError, setPwError] = useState('');
   const [pwSuccess, setPwSuccess] = useState(false);
 
+  // keep editName in sync if user reloads
+  useState(() => { if (user?.name) setEditName(user.name); });
+
+  const handleSaveProfile = async () => {
+    if (!editName.trim()) return;
+    setSavingProfile(true);
+    setProfileMsg('');
+    try {
+      await updateProfile(editName.trim());
+      await refreshUser();
+      setProfileMsg('Saved.');
+      setTimeout(() => setProfileMsg(''), 2000);
+    } catch {
+      setProfileMsg('Failed to save.');
+    } finally { setSavingProfile(false); }
+  };
+
   const handleSignatureUpload = async (file: File) => {
     if (!user) return;
+    setSigError('');
+    // Show local preview immediately
+    const localUrl = URL.createObjectURL(file);
+    setLocalSigUrl(localUrl);
     setUploading(true);
     try {
       await uploadSignature(user.user_id, file);
       await refreshUser();
+      setLocalSigUrl(null); // real URL now in user object
+    } catch {
+      setSigError('Upload failed. Please try again.');
+      setLocalSigUrl(null);
     } finally { setUploading(false); }
   };
 
@@ -470,33 +501,61 @@ function ProfileTab() {
     else { const e = await res.json(); setPwError(e.error ?? 'Failed'); }
   };
 
+  const displaySig = localSigUrl ?? user?.signature_url ?? null;
+
   return (
     <div className="space-y-6 max-w-lg">
+      {/* Profile */}
       <div className="bg-white border border-gray-200 rounded-lg p-5">
         <h2 className="font-semibold text-gray-800 mb-4">My Profile</h2>
-        <div className="space-y-2 text-sm">
-          <div className="flex gap-2"><span className="text-gray-400 w-24">Name:</span><span>{user?.name}</span></div>
-          <div className="flex gap-2"><span className="text-gray-400 w-24">Email:</span><span>{user?.email}</span></div>
-          <div className="flex gap-2"><span className="text-gray-400 w-24">Role:</span><span className="capitalize">{user?.role}</span></div>
+        <div className="space-y-3">
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Display Name</label>
+            <input
+              className="input w-full"
+              value={editName}
+              onChange={(e) => setEditName(e.target.value)}
+            />
+          </div>
+          <div className="text-sm space-y-1">
+            <div className="flex gap-2"><span className="text-gray-400 w-16">Email:</span><span>{user?.email}</span></div>
+            <div className="flex gap-2"><span className="text-gray-400 w-16">Role:</span><span className="capitalize">{user?.role}</span></div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleSaveProfile}
+              disabled={savingProfile || !editName.trim() || editName.trim() === user?.name}
+              className="px-4 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
+            >
+              {savingProfile ? 'Saving…' : 'Save Changes'}
+            </button>
+            {profileMsg && <span className={`text-xs ${profileMsg === 'Saved.' ? 'text-green-600' : 'text-red-600'}`}>{profileMsg}</span>}
+          </div>
         </div>
       </div>
 
+      {/* Signature */}
       <div className="bg-white border border-gray-200 rounded-lg p-5">
         <h2 className="font-semibold text-gray-800 mb-4">Signature</h2>
-        {user?.signature_url && (
+        {displaySig ? (
           <div className="mb-3 p-3 border border-gray-100 rounded bg-gray-50 inline-block">
-            <img src={user.signature_url} alt="Your signature" className="max-h-16 max-w-xs object-contain" />
+            <img src={displaySig} alt="Your signature" className="max-h-20 max-w-xs object-contain" />
+            {uploading && <p className="text-xs text-blue-500 mt-1">Uploading…</p>}
           </div>
-        )}
-        <label className={`flex items-center gap-2 cursor-pointer px-4 py-2 border border-gray-300 rounded text-sm w-fit hover:bg-gray-50 ${uploading ? 'opacity-50' : ''}`}>
+        ) : uploading ? (
+          <div className="mb-3 text-xs text-blue-500">Uploading…</div>
+        ) : null}
+        {sigError && <p className="text-xs text-red-500 mb-2">{sigError}</p>}
+        <label className={`flex items-center gap-2 cursor-pointer px-4 py-2 border border-gray-300 rounded text-sm w-fit hover:bg-gray-50 ${uploading ? 'opacity-50 pointer-events-none' : ''}`}>
           <Upload className="w-4 h-4" />
-          {user?.signature_url ? 'Replace Signature' : 'Upload Signature'}
+          {displaySig ? 'Replace Signature' : 'Upload Signature'}
           <input type="file" className="hidden" accept=".png,.jpg,.jpeg"
             onChange={(e) => e.target.files?.[0] && handleSignatureUpload(e.target.files[0])} />
         </label>
         <p className="text-xs text-gray-400 mt-1">PNG with transparent background recommended.</p>
       </div>
 
+      {/* Password */}
       <div className="bg-white border border-gray-200 rounded-lg p-5">
         <h2 className="font-semibold text-gray-800 mb-4">Change Password</h2>
         <form onSubmit={handlePasswordChange} className="space-y-3">

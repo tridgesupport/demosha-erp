@@ -73,6 +73,18 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
+// PATCH /api/auth/profile  (update own name)
+router.patch('/profile', requireAuth, async (req: Request, res: Response) => {
+  const name = String(req.body.name ?? '').trim();
+  if (!name) return res.status(400).json({ error: 'Name is required' });
+  try {
+    await sql`UPDATE users SET name = ${name}, updated_at = NOW() WHERE user_id = ${req.user!.user_id}`;
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update profile' });
+  }
+});
+
 // PATCH /api/auth/password  (change own password while logged in)
 router.patch('/password', requireAuth, async (req: Request, res: Response) => {
   const { current_password, new_password } = req.body;

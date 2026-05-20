@@ -554,9 +554,16 @@ function ProfileTab() {
 
         {/* Preview area */}
         {displaySig ? (
-          <div className="mb-4 p-4 border border-gray-200 rounded-lg bg-gray-50 inline-flex flex-col items-start gap-2">
+          <div className="mb-4 inline-flex flex-col items-start gap-2">
             <p className="text-xs text-gray-500 font-medium">Current signature:</p>
-            <img src={displaySig} alt="Your signature" className="max-h-20 max-w-xs object-contain" />
+            {/* Checkered background makes transparent PNGs visible */}
+            <div className="border border-gray-200 rounded-lg p-3 min-h-[80px] min-w-[200px] flex items-center justify-center"
+              style={{ backgroundImage: 'linear-gradient(45deg,#e5e7eb 25%,transparent 25%),linear-gradient(-45deg,#e5e7eb 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#e5e7eb 75%),linear-gradient(-45deg,transparent 75%,#e5e7eb 75%)', backgroundSize: '12px 12px', backgroundPosition: '0 0,0 6px,6px -6px,-6px 0' }}>
+              <img src={displaySig} alt="Your signature" className="max-h-20 max-w-xs object-contain" />
+            </div>
+            <a href={displaySig} target="_blank" rel="noopener noreferrer" className="text-xs text-blue-600 hover:underline">
+              Open full size ↗
+            </a>
             {uploading && <p className="text-xs text-blue-500">Saving to server…</p>}
           </div>
         ) : (

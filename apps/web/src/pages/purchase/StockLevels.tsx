@@ -1,6 +1,6 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, TrendingDown, TrendingUp, CheckCircle, MinusCircle, Edit2, X, Check } from 'lucide-react';
+import { AlertTriangle, TrendingDown, TrendingUp, CheckCircle, MinusCircle, Edit2, X, Check, ChevronUp, ChevronDown } from 'lucide-react';
 import { fetchStockLevels, updateItemStock, fetchPurchaseItemGroups } from '@/lib/api';
 
 type StockItem = {
@@ -15,6 +15,7 @@ type StockItem = {
 };
 
 type StockStatus = 'critical' | 'low' | 'ok' | 'excess' | 'no_minimum';
+type SortKey = 'item_code' | 'item_name' | 'category' | 'current_stock' | 'min_level' | 'pct' | 'default_unit' | 'status';
 
 function getStockStatus(current: number, min: number | null): StockStatus {
   if (min == null || min === 0) return 'no_minimum';
@@ -121,6 +122,8 @@ export default function StockLevels() {
   const [category,        setCategory]        = useState('');
   const [alertOnly,       setAlertOnly]       = useState(true);
   const [statusFilter,    setStatusFilter]    = useState<StockStatus[]>([]);
+  const [sortKey,         setSortKey]         = useState<SortKey>('item_name');
+  const [sortDir,         setSortDir]         = useState<'asc' | 'desc'>('asc');
   const [editingId,       setEditingId]       = useState<string | null>(null);
   const [editStock,       setEditStock]       = useState('');
   const [editMin,         setEditMin]         = useState('');
@@ -147,6 +150,8 @@ export default function StockLevels() {
     return Array.from(cats).sort();
   }, [groups, rows]);
 
+  const STATUS_ORDER: Record<StockStatus, number> = { critical: 0, low: 1, ok: 2, excess: 3, no_minimum: 4 };
+
   const displayed = useMemo(() => {
     let r = rows;
     if (category) {
@@ -155,8 +160,28 @@ export default function StockLevels() {
     if (statusFilter.length > 0) {
       r = r.filter(item => statusFilter.includes(getStockStatus(Number(item.current_stock), item.min_level)));
     }
-    return r;
-  }, [rows, category, statusFilter]);
+    return [...r].sort((a, b) => {
+      let av: string | number = '';
+      let bv: string | number = '';
+      if (sortKey === 'current_stock' || sortKey === 'min_level') {
+        av = Number(a[sortKey] ?? 0);
+        bv = Number(b[sortKey] ?? 0);
+      } else if (sortKey === 'pct') {
+        av = a.min_level ? Number(a.current_stock) / Number(a.min_level) : -1;
+        bv = b.min_level ? Number(b.current_stock) / Number(b.min_level) : -1;
+      } else if (sortKey === 'status') {
+        av = STATUS_ORDER[getStockStatus(Number(a.current_stock), a.min_level)];
+        bv = STATUS_ORDER[getStockStatus(Number(b.current_stock), b.min_level)];
+      } else {
+        av = (a[sortKey] ?? '') as string;
+        bv = (b[sortKey] ?? '') as string;
+      }
+      const cmp = typeof av === 'number'
+        ? (av as number) - (bv as number)
+        : String(av).localeCompare(String(bv), undefined, { numeric: true });
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+  }, [rows, category, statusFilter, sortKey, sortDir]);
 
   const mutation = useMutation({
     mutationFn: ({ id, body }: { id: string; body: { current_stock?: number | null; min_level?: number | null } }) =>
@@ -166,6 +191,18 @@ export default function StockLevels() {
       setEditingId(null);
     },
   });
+
+  function toggleSort(key: SortKey) {
+    if (sortKey === key) setSortDir(d => d === 'asc' ? 'desc' : 'asc');
+    else { setSortKey(key); setSortDir('asc'); }
+  }
+
+  function SortIcon({ col }: { col: SortKey }) {
+    if (sortKey !== col) return <ChevronUp className="w-3 h-3 inline opacity-20" />;
+    return sortDir === 'asc'
+      ? <ChevronUp className="w-3 h-3 inline" />
+      : <ChevronDown className="w-3 h-3 inline" />;
+  }
 
   function toggleStatus(s: StockStatus) {
     setStatusFilter(prev =>
@@ -275,14 +312,24 @@ export default function StockLevels() {
             <table className="min-w-full text-sm">
               <thead className="bg-gray-50 text-gray-600 text-xs uppercase tracking-wide">
                 <tr>
-                  <th className="px-4 py-3 text-left">Code</th>
-                  <th className="px-4 py-3 text-left">Item Name</th>
-                  <th className="px-4 py-3 text-left">Category</th>
-                  <th className="px-4 py-3 text-right">Current Stock</th>
-                  <th className="px-4 py-3 text-right">Min Level</th>
-                  <th className="px-4 py-3 text-right">% of Min</th>
-                  <th className="px-4 py-3 text-left">Unit</th>
-                  <th className="px-4 py-3 text-left">Status</th>
+                  {([
+                    ['item_code',     'Code',          'text-left'],
+                    ['item_name',     'Item Name',     'text-left'],
+                    ['category',      'Category',      'text-left'],
+                    ['current_stock', 'Current Stock', 'text-right'],
+                    ['min_level',     'Min Level',     'text-right'],
+                    ['pct',           '% of Min',      'text-right'],
+                    ['default_unit',  'Unit',          'text-left'],
+                    ['status',        'Status',        'text-left'],
+                  ] as [SortKey, string, string][]).map(([key, label, align]) => (
+                    <th
+                      key={key}
+                      className={`px-4 py-3 ${align} cursor-pointer select-none hover:text-gray-900`}
+                      onClick={() => toggleSort(key)}
+                    >
+                      {label} <SortIcon col={key} />
+                    </th>
+                  ))}
                   <th className="px-4 py-3 text-center">Edit</th>
                 </tr>
               </thead>

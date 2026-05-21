@@ -4,6 +4,7 @@
   "installCommand": "yarn install",
   "framework": null,
   "rewrites": [
+    { "source": "/api/(.*)", "destination": "/api/[...path]" },
     { "source": "/(.*)", "destination": "/" }
   ]
 }

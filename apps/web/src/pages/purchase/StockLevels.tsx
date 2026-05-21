@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, TrendingDown, TrendingUp, CheckCircle, MinusCircle, Edit2, X, Check } from 'lucide-react';
 import { fetchStockLevels, updateItemStock, fetchPurchaseItemGroups } from '@/lib/api';
@@ -42,15 +42,21 @@ export default function StockLevels() {
   const queryClient = useQueryClient();
 
   const [search,    setSearch]    = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [category,  setCategory]  = useState('');
-  const [alertOnly, setAlertOnly] = useState(false);
+  const [alertOnly, setAlertOnly] = useState(true);
   const [editingId, setEditingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const t = setTimeout(() => setDebouncedSearch(search), 300);
+    return () => clearTimeout(t);
+  }, [search]);
   const [editStock, setEditStock] = useState('');
   const [editMin,   setEditMin]   = useState('');
 
   const { data: rows = [], isLoading } = useQuery<StockItem[]>({
-    queryKey: ['stock-levels', search, category, alertOnly],
-    queryFn: () => fetchStockLevels({ q: search, category, alert_only: alertOnly }) as Promise<StockItem[]>,
+    queryKey: ['stock-levels', debouncedSearch, category, alertOnly],
+    queryFn: () => fetchStockLevels({ q: debouncedSearch, category, alert_only: alertOnly }) as Promise<StockItem[]>,
   });
 
   const { data: groups = {} } = useQuery<Record<string, string[]>>({
@@ -177,7 +183,7 @@ export default function StockLevels() {
               {rows.length === 0 ? (
                 <tr>
                   <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
-                    {alertOnly ? 'No items outside the ±10% range' : 'No items found'}
+                    {alertOnly ? 'No stock alerts — all items are within range' : 'No items found'}
                   </td>
                 </tr>
               ) : rows.map(item => {

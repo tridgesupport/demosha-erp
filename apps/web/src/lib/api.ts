@@ -287,6 +287,19 @@ export const uploadApprovedPo = (orderId: string, file: File) => {
   return fetch(`${BASE_URL}/api/purchase/orders/${orderId}/upload-approved-po`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
 };
 
+// Stock Levels
+export const fetchStockLevels = (params?: { q?: string; category?: string; alert_only?: boolean }) => {
+  const p = new URLSearchParams();
+  if (params?.q)          p.set('q',          params.q);
+  if (params?.category)   p.set('category',   params.category);
+  if (params?.alert_only) p.set('alert_only', 'true');
+  const qs = p.toString();
+  return request(`/api/purchase/items/stock-levels${qs ? `?${qs}` : ''}`);
+};
+
+export const updateItemStock = (itemId: string, body: { current_stock?: number | null; min_level?: number | null }) =>
+  request(`/api/purchase/items/${itemId}/stock`, { method: 'PUT', body: JSON.stringify(body) });
+
 // Catalogue SKUs
 export const fetchSkus = (search?: string) => {
   const p = new URLSearchParams({ q: search ?? '' });

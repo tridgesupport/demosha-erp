@@ -4,6 +4,58 @@ import sql from '../db/client';
 
 const router = Router();
 
+router.get('/stock-levels', async (req: Request, res: Response) => {
+  const q          = String(req.query.q          ?? '').trim();
+  const category   = String(req.query.category   ?? '').trim();
+  const alertOnly  = req.query.alert_only === 'true';
+  try {
+    const rows = await sql`
+      SELECT item_id, item_code, item_name, default_unit, item_group, category,
+             COALESCE(current_stock, 0) AS current_stock, min_level
+      FROM purchase_items
+      WHERE deleted_at IS NULL
+        AND (${q}        = '' OR item_name ILIKE ${'%' + q + '%'} OR item_code ILIKE ${'%' + q + '%'})
+        AND (${category} = '' OR category = ${category})
+        AND (
+          NOT ${alertOnly}
+          OR (
+            min_level IS NOT NULL AND min_level > 0
+            AND (
+              COALESCE(current_stock, 0) < min_level * 0.9
+              OR COALESCE(current_stock, 0) > min_level * 1.1
+            )
+          )
+        )
+      ORDER BY category, item_name
+    `;
+    res.json(rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch stock levels' });
+  }
+});
+
+router.put('/:id/stock', requireAuth, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { current_stock, min_level } = req.body;
+  try {
+    const rows = await sql`
+      UPDATE purchase_items SET
+        current_stock = ${current_stock ?? null},
+        min_level     = ${min_level ?? null},
+        updated_at    = NOW()
+      WHERE item_id = ${id} AND deleted_at IS NULL
+      RETURNING item_id, item_code, item_name, default_unit, item_group, category,
+                COALESCE(current_stock, 0) AS current_stock, min_level
+    `;
+    if (!rows.length) return res.status(404).json({ error: 'Item not found' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to update stock' });
+  }
+});
+
 router.get('/groups', async (_req: Request, res: Response) => {
   try {
     const rows = await sql`

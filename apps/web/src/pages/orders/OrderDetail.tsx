@@ -77,7 +77,7 @@ export default function OrderDetail() {
       const fd = new FormData();
       fd.append('file', blob, 'proforma.pdf');
       const token = localStorage.getItem('token');
-      const res = await fetch(`${import.meta.env.VITE_API_URL ?? ''}/api/orders/${id}/upload-proforma`, {
+      const res = await fetch(`/api/orders/${id}/upload-proforma`, {
         method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd,
       });
       if (res.ok) {
@@ -117,7 +117,7 @@ export default function OrderDetail() {
       const fd = new FormData();
       fd.append('file', blob, 'approved_pi.pdf');
       const token = localStorage.getItem('token');
-      await fetch(`${import.meta.env.VITE_API_URL ?? ''}/api/orders/${id}/upload-approved-pi`, {
+      await fetch(`/api/orders/${id}/upload-approved-pi`, {
         method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: fd,
       });
       queryClient.invalidateQueries({ queryKey: ['order', id] });

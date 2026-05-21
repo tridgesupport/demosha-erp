@@ -182,7 +182,7 @@ export default function NewOrder() {
       try {
         const fd = new FormData();
         fd.append('file', poCopyFile);
-        const uploadRes = await fetch(`${import.meta.env.VITE_API_URL ?? ''}/api/orders/upload-po`, { method: 'POST', body: fd });
+        const uploadRes = await fetch(`/api/orders/upload-po`, { method: 'POST', body: fd });
         if (!uploadRes.ok) throw new Error('Upload failed');
         const { url } = await uploadRes.json();
         poCopyUrl = url;

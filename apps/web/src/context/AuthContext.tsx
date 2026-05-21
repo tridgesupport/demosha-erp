@@ -21,7 +21,7 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue>(null!);
 
-const BASE = (import.meta.env.VITE_API_URL ?? '').trim();
+const BASE = '';
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);

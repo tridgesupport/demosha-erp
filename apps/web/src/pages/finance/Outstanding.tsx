@@ -137,7 +137,7 @@ function OutstandingTab({ partyType }: { partyType: string }) {
                       className={`hover:bg-blue-50 cursor-pointer ${rowBg}`}
                       onClick={() => navigate(`/customers/${r.customer_id}`)}
                     >
-                      <td className="px-4 py-2.5 font-medium text-gray-800">{r.party_name}</td>
+                      <td className="px-4 py-2.5 font-medium text-gray-800">{r.customer_name}</td>
                       <td className="px-4 py-2.5 font-mono text-xs text-gray-500">{r.gstin ?? '—'}</td>
                       <td className="px-4 py-2.5 text-right">{r.bill_count}</td>
                       <td className="px-4 py-2.5 text-right font-medium">{formatINR(r.total_pending)}</td>
@@ -208,7 +208,7 @@ function AlertsTab() {
             ) : (
               (alerts as any[]).map((a) => (
                 <tr key={a.alert_id} className={a.is_acknowledged ? 'opacity-50' : ''}>
-                  <td className="px-4 py-2.5 font-medium">{a.party_name}</td>
+                  <td className="px-4 py-2.5 font-medium">{a.customer_name}</td>
                   <td className="px-4 py-2.5 text-right">{formatINR(a.pending_amount)}</td>
                   <td className="px-4 py-2.5 text-center"><OverdueBadge days={a.overdue_days} /></td>
                   <td className="px-4 py-2.5 text-center">

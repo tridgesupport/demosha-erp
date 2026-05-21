@@ -85,7 +85,7 @@ export default function FilterBar() {
           )}
           {filters.customerId && (
             <Chip
-              label={`Customer: ${customers.find((c) => c.customer_id === filters.customerId)?.party_name ?? '…'}`}
+              label={`Customer: ${customers.find((c) => c.customer_id === filters.customerId)?.customer_name ?? '…'}`}
               onRemove={() => setFilter('customerId', null)}
             />
           )}
@@ -158,7 +158,7 @@ export default function FilterBar() {
               >
                 <option value="">All customers</option>
                 {customers.map((c) => (
-                  <option key={c.customer_id} value={c.customer_id}>{c.party_name}</option>
+                  <option key={c.customer_id} value={c.customer_id}>{c.customer_name}</option>
                 ))}
               </select>
             </div>

@@ -208,7 +208,7 @@ export default function Dashboard() {
                       to={`/customers/${alert.customer_id}`}
                       className="font-medium text-gray-900 hover:underline text-sm"
                     >
-                      {alert.party_name}
+                      {alert.customer_name}
                     </Link>
                     <div className="text-xs text-gray-500 mt-0.5">
                       {formatINR(alert.total_pending)} pending

@@ -23,7 +23,7 @@ export default function CustomersList() {
     const q = search.toLowerCase();
     return rows.filter(
       (c) =>
-        c.party_name?.toLowerCase().includes(q) ||
+        c.customer_name?.toLowerCase().includes(q) ||
         c.gstin?.toLowerCase().includes(q)
     );
   }, [rows, search]);
@@ -83,7 +83,7 @@ export default function CustomersList() {
                     className="hover:bg-blue-50 cursor-pointer"
                     onClick={() => navigate(`/customers/${c.customer_id}`)}
                   >
-                    <td className="px-4 py-2.5 font-medium text-gray-800">{c.party_name}</td>
+                    <td className="px-4 py-2.5 font-medium text-gray-800">{c.customer_name}</td>
                     <td className="px-4 py-2.5 text-gray-500 font-mono text-xs">{c.gstin ?? '—'}</td>
                     <td className="px-4 py-2.5 text-gray-600">{c.state_name ?? '—'}</td>
                     <td className="px-4 py-2.5 text-right font-medium">{formatINR(c.total_pending)}</td>

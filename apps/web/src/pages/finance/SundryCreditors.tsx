@@ -61,7 +61,7 @@ export default function SundryCreditors() {
                     <tr key={r.customer_id}
                       className={`hover:bg-blue-50 cursor-pointer ${rowBg}`}
                       onClick={() => navigate(`/customers/${r.customer_id}`)}>
-                      <td className="px-4 py-2.5 font-medium text-gray-800">{r.party_name}</td>
+                      <td className="px-4 py-2.5 font-medium text-gray-800">{r.customer_name}</td>
                       <td className="px-4 py-2.5 font-mono text-xs text-gray-500">{r.gstin ?? '—'}</td>
                       <td className="px-4 py-2.5 text-right">{r.bill_count}</td>
                       <td className="px-4 py-2.5 text-right font-medium">{formatINR(r.total_pending)}</td>

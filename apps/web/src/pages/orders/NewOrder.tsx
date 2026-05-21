@@ -86,7 +86,7 @@ export default function NewOrder() {
     setBuyerId(id);
     const c = customers.find((c) => c.customer_id === id);
     if (c) {
-      setBuyerAddress(c.primary_address ?? '');
+      setBuyerAddress(c.address ?? '');
       setBuyerGstin(c.gstin ?? '');
       setBuyerStateCode(c.primary_state_code ?? null);
       if (c.payment_terms_days != null) setPaymentTermsDays(c.payment_terms_days);
@@ -280,7 +280,7 @@ export default function NewOrder() {
                 <div className="flex gap-2">
                   <select className={`input flex-1 ${fe('buyerId')}`} value={buyerId} onChange={(e) => { handleBuyerSelect(e.target.value); clearFe('buyerId'); }}>
                     <option value="">Select customer…</option>
-                    {customers.map((c) => <option key={c.customer_id} value={c.customer_id}>{c.party_name}</option>)}
+                    {customers.map((c) => <option key={c.customer_id} value={c.customer_id}>{c.customer_name}</option>)}
                   </select>
                   <button
                     type="button"

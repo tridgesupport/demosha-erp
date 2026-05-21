@@ -39,7 +39,7 @@ export default function CustomerDetail() {
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         <Link to="/customers" className="text-gray-500 hover:text-gray-700 text-sm">← Customers</Link>
-        <h1 className="text-2xl font-bold text-gray-900">{c.party_name}</h1>
+        <h1 className="text-2xl font-bold text-gray-900">{c.customer_name}</h1>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
@@ -69,9 +69,9 @@ export default function CustomerDetail() {
                 <div>
                   <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">Bill To (Buyer)</p>
                   <div className="grid grid-cols-2 gap-3 text-sm">
-                    {(['party_name', 'gstin'] as const).map((field) => (
+                    {(['customer_name', 'gstin'] as const).map((field) => (
                       <div key={field}>
-                        <label className="text-xs text-gray-400">{field === 'party_name' ? 'Buyer Name' : 'Buyer GSTIN'}</label>
+                        <label className="text-xs text-gray-400">{field === 'customer_name' ? 'Customer Name' : 'GSTIN'}</label>
                         <input className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm" value={form[field] ?? ''} onChange={(e) => setForm({ ...form, [field]: e.target.value })} />
                       </div>
                     ))}
@@ -87,7 +87,7 @@ export default function CustomerDetail() {
                     ))}
                     <div className="col-span-2">
                       <label className="text-xs text-gray-400">Buyer Address</label>
-                      <textarea className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm" rows={2} value={form.primary_address ?? ''} onChange={(e) => setForm({ ...form, primary_address: e.target.value })} />
+                      <textarea className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm" rows={2} value={form.address ?? ''} onChange={(e) => setForm({ ...form, address: e.target.value })} />
                     </div>
                   </div>
                 </div>
@@ -128,7 +128,7 @@ export default function CustomerDetail() {
                     ].map(([k, v]) => v ? (
                       <div key={k}><span className="text-gray-400">{k}: </span><span className="font-medium">{v}</span></div>
                     ) : null)}
-                    {c.primary_address && <div className="col-span-2 text-gray-600 text-xs">{c.primary_address}</div>}
+                    {c.address && <div className="col-span-2 text-gray-600 text-xs">{c.address}</div>}
                   </div>
                 </div>
                 {(c.consignee_name || c.consignee_address) && (

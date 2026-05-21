@@ -47,7 +47,7 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
       sql`
         SELECT
           o.order_id, o.pi_number, o.order_date, o.status, o.total_amount,
-          b.party_name AS buyer_name,
+          b.customer_name AS buyer_name,
           a.agent_name
         FROM sales_orders o
         LEFT JOIN customers b ON b.customer_id = o.buyer_id
@@ -65,7 +65,7 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
       `,
       sql`
         SELECT
-          customer_id, party_name,
+          customer_id, customer_name,
           total_pending, max_overdue_days,
           overdue_90_plus, overdue_60_89, overdue_30_59
         FROM v_customer_outstanding

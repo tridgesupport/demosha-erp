@@ -183,8 +183,8 @@ export default function NewPurchaseOrder() {
     setSupplierId(id);
     const cust = customers.find((c: any) => c.customer_id === id);
     if (cust) {
-      setSupplierName(cust.party_name ?? '');
-      setSupplierAddress(cust.primary_address ?? '');
+      setSupplierName(cust.customer_name ?? '');
+      setSupplierAddress(cust.address ?? '');
       setSupplierGstin(cust.gstin ?? '');
     }
   };
@@ -358,7 +358,7 @@ export default function NewPurchaseOrder() {
               <select value={supplierId} onChange={(e) => handleSupplierChange(e.target.value)}
                 className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full">
                 <option value="">— Select customer / supplier —</option>
-                {customers.map((c: any) => <option key={c.customer_id} value={c.customer_id}>{c.party_name}</option>)}
+                {customers.map((c: any) => <option key={c.customer_id} value={c.customer_id}>{c.customer_name}</option>)}
               </select>
             </div>
             <div>

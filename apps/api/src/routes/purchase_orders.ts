@@ -68,7 +68,7 @@ router.get('/:id', async (req: Request, res: Response) => {
           o.*,
           fy.fy_label,
           fy.fy_key AS fy_key_val,
-          c.party_name AS supplier_party_name,
+          c.customer_name AS supplier_party_name,
           u.signature_url AS approver_signature_url,
           u.name          AS approver_name
         FROM purchase_orders o

@@ -10,10 +10,10 @@ interface Props {
 }
 
 const EMPTY = {
-  party_name: '',
+  customer_name: '',
   gstin: '',
   primary_state_code: '' as number | '',
-  primary_address: '',
+  address: '',
   consignee_name: '',
   consignee_gstin: '',
   consignee_state_code: '' as number | '',
@@ -33,15 +33,15 @@ export default function CustomerFormModal({ onClose, onCreated }: Props) {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!form.party_name.trim()) { setError('Buyer name is required'); return; }
+    if (!form.customer_name.trim()) { setError('Buyer name is required'); return; }
     setSaving(true); setError('');
     try {
       const body = {
         ...form,
         primary_state_code: form.primary_state_code !== '' ? Number(form.primary_state_code) : null,
         payment_terms_days: form.payment_terms_days !== '' ? Number(form.payment_terms_days) : null,
-        consignee_name: sameAsbuyer ? form.party_name : (form.consignee_name || null),
-        consignee_address: sameAsbuyer ? form.primary_address : (form.consignee_address || null),
+        consignee_name: sameAsbuyer ? form.customer_name : (form.consignee_name || null),
+        consignee_address: sameAsbuyer ? form.address : (form.consignee_address || null),
         consignee_gstin: sameAsbuyer ? form.gstin : (form.consignee_gstin || null),
         consignee_state_code: sameAsbuyer
           ? (form.primary_state_code !== '' ? Number(form.primary_state_code) : null)
@@ -73,7 +73,7 @@ export default function CustomerFormModal({ onClose, onCreated }: Props) {
             <div className="grid grid-cols-2 gap-3">
               <div className="col-span-2">
                 <label className="block text-xs text-gray-500 mb-1">Buyer Name *</label>
-                <input className="input w-full" required value={form.party_name} onChange={(e) => set('party_name', e.target.value)} />
+                <input className="input w-full" required value={form.customer_name} onChange={(e) => set('customer_name', e.target.value)} />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Buyer GSTIN</label>
@@ -88,7 +88,7 @@ export default function CustomerFormModal({ onClose, onCreated }: Props) {
               </div>
               <div className="col-span-2">
                 <label className="block text-xs text-gray-500 mb-1">Buyer Address</label>
-                <textarea className="input w-full" rows={2} value={form.primary_address} onChange={(e) => set('primary_address', e.target.value)} />
+                <textarea className="input w-full" rows={2} value={form.address} onChange={(e) => set('address', e.target.value)} />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Payment Terms (Days)</label>

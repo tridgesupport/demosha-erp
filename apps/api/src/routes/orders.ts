@@ -22,8 +22,8 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
       sql`
         SELECT
           o.order_id, o.pi_number, o.fy_key, o.seq_number, o.order_date, o.status,
-          o.buyer_id,    b.party_name AS buyer_name,
-          o.consignee_id, c.party_name AS consignee_name,
+          o.buyer_id,    b.customer_name AS buyer_name,
+          o.consignee_id, c.customer_name AS consignee_name,
           o.agent_id,    a.agent_name,
           o.total_amount, o.is_cancelled, o.revision_number,
           o.submitted_at, o.submitted_by, o.approved_at, o.approved_by,
@@ -47,7 +47,7 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
           AND (${statusFilter}::text[] IS NULL OR o.status = ANY(${statusFilter}::text[]))
           AND (${f.piFrom}::int IS NULL      OR o.seq_number   >= ${f.piFrom}::int)
           AND (${f.piTo}::int IS NULL        OR o.seq_number   <= ${f.piTo}::int)
-        GROUP BY o.order_id, b.party_name, c.party_name, a.agent_name, fy.fy_label
+        GROUP BY o.order_id, b.customer_name, c.customer_name, a.agent_name, fy.fy_label
         ORDER BY o.order_date DESC NULLS LAST, o.seq_number DESC
         LIMIT ${limit} OFFSET ${offset}
       `,
@@ -181,8 +181,8 @@ router.get('/:id', async (req: Request, res: Response) => {
       sql`
         SELECT
           o.*,
-          b.party_name  AS buyer_name,
-          COALESCE(o.consignee_name, c.party_name) AS consignee_name,
+          b.customer_name  AS buyer_name,
+          COALESCE(o.consignee_name, c.customer_name) AS consignee_name,
           a.agent_name,
           fy.fy_label,
           parent.pi_number AS parent_pi_number,
@@ -342,7 +342,7 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
 
 async function orderFilePrefix(id: string): Promise<string> {
   const rows = await sql`
-    SELECT o.pi_number, b.party_name AS buyer_name
+    SELECT o.pi_number, b.customer_name AS buyer_name
     FROM sales_orders o
     LEFT JOIN customers b ON b.customer_id = o.buyer_id
     WHERE o.order_id = ${id}

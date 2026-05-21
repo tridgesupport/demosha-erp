@@ -14,7 +14,7 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
     const [rows, countRows] = await Promise.all([
       sql`
         SELECT
-          c.customer_id, c.party_name, c.gstin, c.primary_state_code,
+          c.customer_id, c.customer_name, c.gstin, c.primary_state_code,
           sc.state_name, c.contact_phone, c.contact_email, c.is_active,
           COALESCE(vo.total_pending,    0) AS total_pending,
           COALESCE(vo.max_overdue_days, 0) AS max_overdue_days,
@@ -27,21 +27,21 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
           ON (o.buyer_id = c.customer_id OR o.consignee_id = c.customer_id)
           AND o.deleted_at IS NULL AND o.is_cancelled = false
         WHERE c.deleted_at IS NULL
-          AND (${search}::text IS NULL OR c.party_name ILIKE ${search}::text OR c.gstin ILIKE ${search}::text)
+          AND (${search}::text IS NULL OR c.customer_name ILIKE ${search}::text OR c.gstin ILIKE ${search}::text)
           AND (${req.filters.customerId}::uuid IS NULL
                OR c.customer_id = ${req.filters.customerId}::uuid)
         GROUP BY
-          c.customer_id, c.party_name, c.gstin, c.primary_state_code,
+          c.customer_id, c.customer_name, c.gstin, c.primary_state_code,
           sc.state_name, c.contact_phone, c.contact_email, c.is_active,
           vo.total_pending, vo.max_overdue_days
-        ORDER BY c.party_name
+        ORDER BY c.customer_name
         LIMIT ${limit} OFFSET ${offset}
       `,
       sql`
         SELECT COUNT(*)::int AS total
         FROM customers c
         WHERE c.deleted_at IS NULL
-          AND (${search}::text IS NULL OR c.party_name ILIKE ${search}::text OR c.gstin ILIKE ${search}::text)
+          AND (${search}::text IS NULL OR c.customer_name ILIKE ${search}::text OR c.gstin ILIKE ${search}::text)
       `,
     ]);
 
@@ -53,18 +53,18 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
 });
 
 router.post('/', async (req: Request, res: Response) => {
-  const { party_name, gstin, primary_state_code, primary_address,
+  const { customer_name, gstin, primary_state_code, address,
           contact_phone, contact_email, tally_ref, notes, payment_terms_days,
           consignee_name, consignee_address, consignee_gstin, consignee_state_code } = req.body;
   try {
     const rows = await sql`
       INSERT INTO customers
-        (party_name, gstin, primary_state_code, primary_address,
+        (customer_name, gstin, primary_state_code, address,
          contact_phone, contact_email, tally_ref, notes, is_active, payment_terms_days,
          consignee_name, consignee_address, consignee_gstin, consignee_state_code)
       VALUES
-        (${party_name}, ${gstin ?? null}, ${primary_state_code ?? null},
-         ${primary_address ?? null}, ${contact_phone ?? null},
+        (${customer_name}, ${gstin ?? null}, ${primary_state_code ?? null},
+         ${address ?? null}, ${contact_phone ?? null},
          ${contact_email ?? null}, ${tally_ref ?? null}, ${notes ?? null}, true,
          ${payment_terms_days != null ? parseInt(String(payment_terms_days), 10) : null},
          ${consignee_name ?? null}, ${consignee_address ?? null},
@@ -90,7 +90,7 @@ router.get('/:id', async (req: Request, res: Response) => {
       `,
       sql`
         SELECT
-          customer_id, party_name, total_pending, max_overdue_days,
+          customer_id, customer_name, total_pending, max_overdue_days,
           overdue_90_plus, overdue_60_89, overdue_30_59, last_synced_at
         FROM v_customer_outstanding
         WHERE customer_id = ${id}
@@ -115,16 +115,16 @@ router.get('/:id', async (req: Request, res: Response) => {
 
 router.put('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { party_name, gstin, primary_state_code, primary_address,
+  const { customer_name, gstin, primary_state_code, address,
           contact_phone, contact_email, tally_ref, notes, is_active, payment_terms_days,
           consignee_name, consignee_address, consignee_gstin, consignee_state_code } = req.body;
   try {
     const rows = await sql`
       UPDATE customers SET
-        party_name           = ${party_name},
+        customer_name        = ${customer_name},
         gstin                = ${gstin ?? null},
         primary_state_code   = ${primary_state_code ?? null},
-        primary_address      = ${primary_address ?? null},
+        address              = ${address ?? null},
         contact_phone        = ${contact_phone ?? null},
         contact_email        = ${contact_email ?? null},
         tally_ref            = ${tally_ref ?? null},
@@ -152,7 +152,7 @@ router.get('/:id/outstanding', async (req: Request, res: Response) => {
   try {
     const rows = await sql`
       SELECT
-        customer_id, party_name, total_pending, max_overdue_days,
+        customer_id, customer_name, total_pending, max_overdue_days,
         overdue_90_plus, overdue_60_89, overdue_30_59, last_synced_at
       FROM v_customer_outstanding
       WHERE customer_id = ${id}

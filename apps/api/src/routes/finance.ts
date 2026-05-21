@@ -11,7 +11,7 @@ router.get('/outstanding', filtersMiddleware, async (req: Request, res: Response
     const partyType = String(req.query.partyType ?? 'debtor');
     const f = req.filters;
     const rows = await sql`
-      SELECT c.customer_id, c.party_name, c.gstin,
+      SELECT c.customer_id, c.customer_name, c.gstin,
              COALESCE(vo.total_pending,    0) AS total_pending,
              COALESCE(vo.max_overdue_days, 0) AS max_overdue_days,
              COALESCE(vo.overdue_90_plus,  0) AS overdue_90_plus,
@@ -29,7 +29,7 @@ router.get('/outstanding', filtersMiddleware, async (req: Request, res: Response
       WHERE c.deleted_at IS NULL
         AND (${f.customerId}::uuid IS NULL OR c.customer_id = ${f.customerId}::uuid)
       GROUP BY
-        c.customer_id, c.party_name, c.gstin,
+        c.customer_id, c.customer_name, c.gstin,
         vo.total_pending, vo.max_overdue_days,
         vo.overdue_90_plus, vo.overdue_60_89, vo.overdue_30_59
       ORDER BY vo.max_overdue_days DESC NULLS LAST, vo.total_pending DESC
@@ -72,7 +72,7 @@ router.get('/alerts', async (req: Request, res: Response) => {
     const rows = await sql`
       SELECT a.alert_id, a.outstanding_id, a.overdue_days, a.pending_amount,
              a.threshold_days, a.is_acknowledged, a.acknowledged_by, a.acknowledged_at,
-             a.triggered_at, c.party_name, c.customer_id
+             a.triggered_at, c.customer_name, c.customer_id
       FROM finance_outstanding_alerts a
       JOIN customers c ON c.customer_id = a.party_id
       WHERE (NOT ${onlyUnack} OR a.is_acknowledged = false)
@@ -124,11 +124,11 @@ router.post('/sync', upload.single('file') as any, async (req: Request, res: Res
     let inserted = 0;
 
     for (const row of rawRows) {
-      const partyName = row['Party Name'] ?? row['party_name'];
+      const partyName = row['Party Name'] ?? row['customer_name'];
       if (!partyName) continue;
 
       const customer = await sql`
-        SELECT customer_id FROM customers WHERE party_name = ${partyName} AND deleted_at IS NULL LIMIT 1
+        SELECT customer_id FROM customers WHERE customer_name = ${partyName} AND deleted_at IS NULL LIMIT 1
       `;
       if (customer.length === 0) continue;
 

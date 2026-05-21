@@ -287,6 +287,22 @@ export const uploadApprovedPo = (orderId: string, file: File) => {
   return fetch(`${BASE_URL}/api/purchase/orders/${orderId}/upload-approved-po`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
 };
 
+// Vendors
+export const fetchVendors = (search?: string, page = 1, limit = 200) => {
+  const p = new URLSearchParams({ page: String(page), limit: String(limit) });
+  if (search) p.set('search', search);
+  return request(`/api/purchase/vendors?${p.toString()}`);
+};
+
+export const fetchVendor = (id: string) =>
+  request(`/api/purchase/vendors/${id}`);
+
+export const createVendor = (body: unknown) =>
+  request('/api/purchase/vendors', { method: 'POST', body: JSON.stringify(body) });
+
+export const updateVendor = (id: string, body: unknown) =>
+  request(`/api/purchase/vendors/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+
 // Stock Levels
 export const fetchStockLevels = (params?: { q?: string; category?: string; alert_only?: boolean }) => {
   const p = new URLSearchParams();

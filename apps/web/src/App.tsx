@@ -26,6 +26,7 @@ import PurchaseOrdersList from '@/pages/purchase/PurchaseOrdersList';
 import NewPurchaseOrder from '@/pages/purchase/NewPurchaseOrder';
 import PurchaseOrderDetail from '@/pages/purchase/PurchaseOrderDetail';
 import StockLevels from '@/pages/purchase/StockLevels';
+import VendorsList from '@/pages/purchase/VendorsList';
 
 const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: string; exact?: boolean }[] }> = {
   sales: {
@@ -42,6 +43,7 @@ const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: st
     links: [
       { to: '/purchase/indents', label: 'Indents' },
       { to: '/purchase/orders', label: 'Purchase Orders' },
+      { to: '/purchase/vendors', label: 'Vendors' },
       { to: '/purchase/stock-levels', label: 'Stock Levels' },
       { to: '/purchase/creditors', label: 'Sundry Creditors' },
       { to: '/catalog/products', label: 'Catalog' },
@@ -147,7 +149,8 @@ export default function App() {
     location.pathname.match(/^\/orders\/.+\/edit$/) ||
     location.pathname === '/purchase/indents/new' ||
     location.pathname === '/purchase/orders/new' ||
-    location.pathname === '/purchase/stock-levels';
+    location.pathname === '/purchase/stock-levels' ||
+    location.pathname === '/purchase/vendors';
 
   const ROLE_DEFAULTS: Record<string, string[]> = {
     admin: ['sales', 'purchase', 'management'],
@@ -257,6 +260,7 @@ export default function App() {
                 <Route path="/purchase/orders" element={<PurchaseOrdersList />} />
                 <Route path="/purchase/orders/new" element={<NewPurchaseOrder />} />
                 <Route path="/purchase/orders/:id" element={<PurchaseOrderDetail />} />
+                <Route path="/purchase/vendors" element={<VendorsList />} />
                 <Route path="/purchase/stock-levels" element={<StockLevels />} />
                 <Route path="/production" element={<ComingSoon label="Production" />} />
                 <Route path="/inventory" element={<ComingSoon label="Inventory" />} />

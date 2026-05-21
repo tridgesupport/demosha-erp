@@ -15,6 +15,7 @@ import lookupRouter from './routes/lookup';
 import purchaseItemsRouter from './routes/purchase_items';
 import purchaseIndentsRouter from './routes/purchase_indents';
 import purchaseOrdersRouter from './routes/purchase_orders';
+import vendorsRouter from './routes/vendors';
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '3001', 10);
@@ -36,6 +37,7 @@ app.use('/api/lookup', lookupRouter);
 app.use('/api/purchase/items', purchaseItemsRouter);
 app.use('/api/purchase/indents', purchaseIndentsRouter);
 app.use('/api/purchase/orders', purchaseOrdersRouter);
+app.use('/api/purchase/vendors', vendorsRouter);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });

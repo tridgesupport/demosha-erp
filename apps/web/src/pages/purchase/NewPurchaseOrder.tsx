@@ -1,8 +1,8 @@
 import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import {
-  fetchFinancialYears, fetchCustomers, fetchNextPoNumber,
+  fetchFinancialYears, fetchVendors, createVendor, fetchNextPoNumber,
   fetchPurchaseIndent, fetchPurchaseIndents,
 } from '@/lib/api';
 import { useCreatePurchaseOrder } from '@/hooks/usePurchaseOrders';
@@ -35,6 +35,78 @@ function formatDate(d: string | null | undefined) {
 
 
 
+function AddVendorModal({ onClose, onCreated }: { onClose: () => void; onCreated: (v: any) => void }) {
+  const qc = useQueryClient();
+  const [form, setForm] = useState({
+    vendor_name: '', addr1: '', addr2: '', city: '', pincode: '',
+    state: 'Maharashtra', country: 'India', phone: '', mobile: '',
+    email: '', attn: '', gstin: '',
+  });
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState('');
+  const set = (k: string, v: string) => setForm(f => ({ ...f, [k]: v }));
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!form.vendor_name.trim()) { setErr('Vendor name is required'); return; }
+    setSaving(true); setErr('');
+    try {
+      const result = await createVendor(form);
+      qc.invalidateQueries({ queryKey: ['vendors-all'] });
+      onCreated(result);
+    } catch (ex: any) {
+      setErr(ex.message ?? 'Failed to save');
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+          <h2 className="font-semibold text-gray-900">Add New Vendor</h2>
+          <button onClick={onClose} type="button" className="text-gray-400 hover:text-gray-600"><X className="w-5 h-5" /></button>
+        </div>
+        <form onSubmit={save} className="px-5 py-4 space-y-3">
+          {err && <p className="text-sm text-red-600 bg-red-50 rounded px-3 py-2">{err}</p>}
+          <div className="grid grid-cols-2 gap-3">
+            {[
+              { label: 'Vendor Name *', key: 'vendor_name', full: true },
+              { label: 'Address Line 1', key: 'addr1', full: true },
+              { label: 'Address Line 2', key: 'addr2', full: true },
+              { label: 'City', key: 'city' },
+              { label: 'Pincode', key: 'pincode' },
+              { label: 'State', key: 'state' },
+              { label: 'Country', key: 'country' },
+              { label: 'Phone', key: 'phone' },
+              { label: 'Mobile', key: 'mobile' },
+              { label: 'Email', key: 'email' },
+              { label: 'Attn. (Contact)', key: 'attn' },
+              { label: 'GSTIN', key: 'gstin' },
+            ].map(({ label, key, full }) => (
+              <div key={key} className={full ? 'col-span-2' : ''}>
+                <label className="block text-xs font-medium text-gray-600 mb-1">{label}</label>
+                <input
+                  type="text"
+                  value={(form as any)[key]}
+                  onChange={e => set(key, e.target.value)}
+                  className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+              </div>
+            ))}
+          </div>
+          <div className="flex justify-end gap-3 pt-1">
+            <button type="button" onClick={onClose} className="px-4 py-2 border border-gray-300 rounded text-sm hover:bg-gray-50">Cancel</button>
+            <button type="submit" disabled={saving} className="px-5 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-60">
+              {saving ? 'Saving…' : 'Add Vendor'}
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function NewPurchaseOrder() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -45,10 +117,10 @@ export default function NewPurchaseOrder() {
   const { data: fyList = [] } = useQuery({ queryKey: ['financial-years'], queryFn: fetchFinancialYears });
   const currentFy: any = (fyList as any[]).find((f: any) => f.is_current) ?? (fyList as any[])[0];
 
-  const { data: customersRes } = useQuery({
-    queryKey: ['customers-filter'], queryFn: () => fetchCustomers(undefined, undefined, 1, 500),
+  const { data: vendorsRes, isLoading: vendorsLoading } = useQuery({
+    queryKey: ['vendors-all'], queryFn: () => fetchVendors(undefined, 1, 500),
   });
-  const customers: any[] = customersRes?.data ?? [];
+  const allVendors: any[] = (vendorsRes as any)?.data ?? [];
 
   // Fetch approved indents for the searchable dropdown
   const { data: approvedIndentsRes } = useQuery({
@@ -65,6 +137,13 @@ export default function NewPurchaseOrder() {
   const [indentSearch, setIndentSearch] = useState('');
   const [showIndentDrop, setShowIndentDrop] = useState(false);
   const [indentDate, setIndentDate] = useState('');
+
+  // Vendor combobox
+  const [vendorId, setVendorId] = useState<string | null>(null);
+  const [vendorSearch, setVendorSearch] = useState('');
+  const [showVendorDrop, setShowVendorDrop] = useState(false);
+  const vendorDropRef = useRef<HTMLDivElement>(null);
+  const [showAddVendorModal, setShowAddVendorModal] = useState(false);
 
   const [supplierId, setSupplierId] = useState('');
   const [supplierName, setSupplierName] = useState('');
@@ -116,16 +195,55 @@ export default function NewPurchaseOrder() {
     }
   }, [indent]);
 
-  // Close dropdown on outside click
+  // Close dropdowns on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
         setShowIndentDrop(false);
       }
+      if (vendorDropRef.current && !vendorDropRef.current.contains(e.target as Node)) {
+        setShowVendorDrop(false);
+      }
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
+
+  const filteredVendors = (() => {
+    const q = vendorSearch.trim().toLowerCase();
+    if (!q) return allVendors.slice(0, 60);
+    return allVendors.filter(v =>
+      v.vendor_name.toLowerCase().includes(q) ||
+      (v.city ?? '').toLowerCase().includes(q) ||
+      (v.gstin ?? '').toLowerCase().includes(q)
+    ).slice(0, 60);
+  })();
+
+  function formatVendorAddress(v: any): string {
+    return [v.addr1, v.addr2, v.city && v.pincode ? `${v.city} - ${v.pincode}` : v.city ?? v.pincode, v.state]
+      .filter(s => s && s.trim()).join('\n');
+  }
+
+  const handleVendorSelect = (v: any) => {
+    setVendorId(v.vendor_id);
+    setVendorSearch(v.vendor_name);
+    setSupplierId(v.vendor_id);
+    setSupplierName(v.vendor_name ?? '');
+    setSupplierAddress(formatVendorAddress(v));
+    setSupplierGstin(v.gstin ?? '');
+    setSupplierAttn(v.attn ?? '');
+    setShowVendorDrop(false);
+  };
+
+  const handleVendorClear = () => {
+    setVendorId(null);
+    setVendorSearch('');
+    setSupplierId('');
+    setSupplierName('');
+    setSupplierAddress('');
+    setSupplierGstin('');
+    setSupplierAttn('');
+  };
 
   const filteredIndents = indentSearch.trim()
     ? approvedIndents.filter(i =>
@@ -179,16 +297,6 @@ export default function NewPurchaseOrder() {
     return errs;
   };
 
-  const handleSupplierChange = (id: string) => {
-    setSupplierId(id);
-    const cust = customers.find((c: any) => c.customer_id === id);
-    if (cust) {
-      setSupplierName(cust.customer_name ?? '');
-      setSupplierAddress(cust.address ?? '');
-      setSupplierGstin(cust.gstin ?? '');
-    }
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const errs = validate();
@@ -202,6 +310,7 @@ export default function NewPurchaseOrder() {
         indent_id: indentId ?? null,
         indent_number: indent?.indent_number || null,
         indent_date: indentDate || null,
+        vendor_id: vendorId || null,
         supplier_id: supplierId || null,
         supplier_name: supplierName || null,
         supplier_address: supplierAddress || null,
@@ -349,17 +458,88 @@ export default function NewPurchaseOrder() {
           </div>
         </div>
 
+        {/* Add Vendor Modal */}
+        {showAddVendorModal && (
+          <AddVendorModal
+            onClose={() => setShowAddVendorModal(false)}
+            onCreated={(v: any) => {
+              setShowAddVendorModal(false);
+              handleVendorSelect(v);
+            }}
+          />
+        )}
+
         {/* Supplier */}
         <div className="bg-white border border-gray-200 rounded-lg p-5 space-y-4">
           <h2 className="text-sm font-semibold text-gray-700">Supplier</h2>
           <div className="grid grid-cols-2 gap-4">
+            {/* Vendor combobox */}
+            <div className="col-span-2" ref={vendorDropRef}>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Select Vendor / Supplier</label>
+              <div className="relative">
+                <input
+                  type="text"
+                  value={vendorSearch}
+                  onChange={e => {
+                    setVendorSearch(e.target.value);
+                    setShowVendorDrop(true);
+                    if (!e.target.value) handleVendorClear();
+                  }}
+                  onFocus={() => setShowVendorDrop(true)}
+                  placeholder="Search vendor name, city, or GSTIN…"
+                  className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full pr-16"
+                />
+                <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
+                  {vendorId && (
+                    <button type="button" onClick={handleVendorClear}
+                      className="text-gray-400 hover:text-gray-600 p-0.5">
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                  <ChevronDown className="w-3.5 h-3.5 text-gray-400 pointer-events-none" />
+                </div>
+                {showVendorDrop && (
+                  <div className="absolute z-20 top-full left-0 right-0 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg max-h-64 overflow-y-auto">
+                    {vendorsLoading ? (
+                      <div className="px-3 py-3 text-sm text-gray-400 text-center">Loading vendors…</div>
+                    ) : filteredVendors.length === 0 ? (
+                      <div className="px-3 py-3 text-sm text-gray-400 text-center">
+                        {vendorSearch.trim() ? 'No vendors match — use "Add new vendor" below' : 'No vendors loaded'}
+                      </div>
+                    ) : (
+                      filteredVendors.map((v: any) => (
+                        <button
+                          key={v.vendor_id}
+                          type="button"
+                          onMouseDown={() => handleVendorSelect(v)}
+                          className={`w-full text-left px-3 py-2.5 text-sm hover:bg-blue-50 border-b border-gray-50 last:border-0 flex items-center justify-between gap-4 ${
+                            vendorId === v.vendor_id ? 'bg-blue-50 text-blue-700' : 'text-gray-800'
+                          }`}
+                        >
+                          <span className="font-medium">{v.vendor_name}</span>
+                          <span className="text-xs text-gray-400 shrink-0">
+                            {[v.city, v.state].filter(Boolean).join(', ')}
+                            {v.gstin ? ` · ${v.gstin}` : ''}
+                          </span>
+                        </button>
+                      ))
+                    )}
+                    <button
+                      type="button"
+                      onMouseDown={() => { setShowVendorDrop(false); setShowAddVendorModal(true); }}
+                      className="w-full text-left px-3 py-2.5 text-sm text-blue-600 hover:bg-blue-50 border-t border-gray-100 flex items-center gap-1.5 font-medium"
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add new vendor…
+                    </button>
+                  </div>
+                )}
+              </div>
+            </div>
+
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Select Supplier</label>
-              <select value={supplierId} onChange={(e) => handleSupplierChange(e.target.value)}
-                className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full">
-                <option value="">— Select customer / supplier —</option>
-                {customers.map((c: any) => <option key={c.customer_id} value={c.customer_id}>{c.customer_name}</option>)}
-              </select>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Supplier Name</label>
+              <input type="text" value={supplierName} onChange={(e) => setSupplierName(e.target.value)}
+                className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Kind Attn.</label>
@@ -367,25 +547,20 @@ export default function NewPurchaseOrder() {
                 placeholder="Mr. / Ms."
                 className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
             </div>
+            <div className="col-span-2">
+              <label className="block text-xs font-medium text-gray-600 mb-1">Address</label>
+              <textarea value={supplierAddress} onChange={(e) => setSupplierAddress(e.target.value)}
+                rows={3} className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full resize-none" />
+            </div>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Supplier Name</label>
-              <input type="text" value={supplierName} onChange={(e) => setSupplierName(e.target.value)}
+              <label className="block text-xs font-medium text-gray-600 mb-1">GST No.</label>
+              <input type="text" value={supplierGstin} onChange={(e) => setSupplierGstin(e.target.value)}
                 className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
             </div>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Your Quotation Ref.</label>
               <input type="text" value={quotationRef} onChange={(e) => setQuotationRef(e.target.value)}
                 placeholder="VERBAL DISCUSSION"
-                className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
-            </div>
-            <div className="col-span-2">
-              <label className="block text-xs font-medium text-gray-600 mb-1">Address</label>
-              <textarea value={supplierAddress} onChange={(e) => setSupplierAddress(e.target.value)}
-                rows={2} className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full resize-none" />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">GST No.</label>
-              <input type="text" value={supplierGstin} onChange={(e) => setSupplierGstin(e.target.value)}
                 className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
             </div>
           </div>

@@ -316,6 +316,39 @@ export const fetchStockLevels = (params?: { q?: string; category?: string; alert
 export const updateItemStock = (itemId: string, body: { current_stock?: number | null; min_level?: number | null }) =>
   request(`/api/purchase/items/${itemId}/stock`, { method: 'PUT', body: JSON.stringify(body) });
 
+// Production
+export const fetchProductionProducts = () =>
+  request('/api/production/products');
+
+export const fetchNextLogsheetNumber = (productCode: string, fyKey: number) =>
+  request<{ logsheet_no: string }>(`/api/production/logsheets/next-number?productCode=${productCode}&fyKey=${fyKey}`);
+
+export const fetchLogsheets = (params?: { productCode?: string; status?: string; dateFrom?: string; dateTo?: string; page?: number }) => {
+  const p = new URLSearchParams();
+  if (params?.productCode) p.set('productCode', params.productCode);
+  if (params?.status)      p.set('status',      params.status);
+  if (params?.dateFrom)    p.set('dateFrom',     params.dateFrom);
+  if (params?.dateTo)      p.set('dateTo',       params.dateTo);
+  if (params?.page)        p.set('page',         String(params.page));
+  const qs = p.toString();
+  return request(`/api/production/logsheets${qs ? `?${qs}` : ''}`);
+};
+
+export const fetchLogsheet = (id: string) =>
+  request(`/api/production/logsheets/${id}`);
+
+export const createLogsheet = (body: unknown) =>
+  request('/api/production/logsheets', { method: 'POST', body: JSON.stringify(body) });
+
+export const updateLogsheetSection = (id: string, section_key: string, data: Record<string, unknown>) =>
+  request(`/api/production/logsheets/${id}/section`, { method: 'PATCH', body: JSON.stringify({ section_key, data }) });
+
+export const updateLogsheetStatus = (id: string, status: string) =>
+  request(`/api/production/logsheets/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+
+export const bulkApproveLogsheets = (ids: string[]) =>
+  request('/api/production/logsheets/bulk-approve', { method: 'POST', body: JSON.stringify({ ids }) });
+
 // Catalogue SKUs
 export const fetchSkus = (search?: string) => {
   const p = new URLSearchParams({ q: search ?? '' });

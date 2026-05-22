@@ -16,6 +16,7 @@ import purchaseItemsRouter from './routes/purchase_items';
 import purchaseIndentsRouter from './routes/purchase_indents';
 import purchaseOrdersRouter from './routes/purchase_orders';
 import vendorsRouter from './routes/vendors';
+import productionRouter from './routes/production';
 
 const app = express();
 const PORT = parseInt(process.env.PORT ?? '3001', 10);
@@ -38,6 +39,7 @@ app.use('/api/purchase/items', purchaseItemsRouter);
 app.use('/api/purchase/indents', purchaseIndentsRouter);
 app.use('/api/purchase/orders', purchaseOrdersRouter);
 app.use('/api/purchase/vendors', vendorsRouter);
+app.use('/api/production', productionRouter);
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -66,6 +68,15 @@ async function bootstrap() {
         ('factory',     'management')
     `;
   }
+  // Ensure production permissions exist (idempotent)
+  await sql`
+    INSERT INTO role_tab_permissions (role, tab) VALUES
+      ('admin',          'production'),
+      ('manager',        'production'),
+      ('factory',        'production'),
+      ('plant_incharge', 'production')
+    ON CONFLICT DO NOTHING
+  `;
 }
 
 bootstrap()

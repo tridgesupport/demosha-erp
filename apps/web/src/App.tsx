@@ -27,6 +27,9 @@ import NewPurchaseOrder from '@/pages/purchase/NewPurchaseOrder';
 import PurchaseOrderDetail from '@/pages/purchase/PurchaseOrderDetail';
 import StockLevels from '@/pages/purchase/StockLevels';
 import VendorsList from '@/pages/purchase/VendorsList';
+import LogsheetList from '@/pages/production/LogsheetList';
+import NewLogsheet from '@/pages/production/NewLogsheet';
+import LogsheetDetail from '@/pages/production/LogsheetDetail';
 
 const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: string; exact?: boolean }[] }> = {
   sales: {
@@ -58,7 +61,7 @@ const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: st
   production: {
     label: 'Production',
     links: [
-      { to: '/production', label: 'Production' },
+      { to: '/production/shs', label: 'SHS' },
     ],
   },
   inventory: {
@@ -150,13 +153,15 @@ export default function App() {
     location.pathname === '/purchase/indents/new' ||
     location.pathname === '/purchase/orders/new' ||
     location.pathname === '/purchase/stock-levels' ||
-    location.pathname === '/purchase/vendors';
+    location.pathname === '/purchase/vendors' ||
+    location.pathname.startsWith('/production');
 
   const ROLE_DEFAULTS: Record<string, string[]> = {
-    admin: ['sales', 'purchase', 'management'],
-    manager: ['sales', 'purchase', 'management'],
-    salesperson: ['sales'],
-    factory: ['purchase', 'management'],
+    admin:          ['sales', 'purchase', 'management', 'production'],
+    manager:        ['sales', 'purchase', 'management', 'production'],
+    salesperson:    ['sales'],
+    factory:        ['purchase', 'management', 'production'],
+    plant_incharge: ['production'],
   };
   const allowed = (user?.allowed_tabs?.length ? user.allowed_tabs : (user?.role ? ROLE_DEFAULTS[user.role] ?? [] : []));
   const activeTab = getActiveTab(location.pathname);
@@ -262,7 +267,9 @@ export default function App() {
                 <Route path="/purchase/orders/:id" element={<PurchaseOrderDetail />} />
                 <Route path="/purchase/vendors" element={<VendorsList />} />
                 <Route path="/purchase/stock-levels" element={<StockLevels />} />
-                <Route path="/production" element={<ComingSoon label="Production" />} />
+                <Route path="/production/:productCode/new" element={<NewLogsheet />} />
+                <Route path="/production/:productCode/:id" element={<LogsheetDetail />} />
+                <Route path="/production/:productCode" element={<LogsheetList />} />
                 <Route path="/inventory" element={<ComingSoon label="Inventory" />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>

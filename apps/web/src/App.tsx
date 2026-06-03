@@ -30,6 +30,9 @@ import VendorsList from '@/pages/purchase/VendorsList';
 import LogsheetList from '@/pages/production/LogsheetList';
 import NewLogsheet from '@/pages/production/NewLogsheet';
 import LogsheetDetail from '@/pages/production/LogsheetDetail';
+import DispatchSchedulesList from '@/pages/dispatch/DispatchSchedulesList';
+import NewDispatchSchedule from '@/pages/dispatch/NewDispatchSchedule';
+import DispatchScheduleDetail from '@/pages/dispatch/DispatchScheduleDetail';
 
 const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: string; exact?: boolean }[] }> = {
   sales: {
@@ -56,6 +59,7 @@ const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: st
     label: 'Management',
     links: [
       { to: '/finance/outstanding', label: 'Finance' },
+      { to: '/dispatch/schedules', label: 'Dispatch Schedules' },
     ],
   },
   production: {
@@ -154,7 +158,9 @@ export default function App() {
     location.pathname === '/purchase/orders/new' ||
     location.pathname === '/purchase/stock-levels' ||
     location.pathname === '/purchase/vendors' ||
-    location.pathname.startsWith('/production');
+    location.pathname.startsWith('/production') ||
+    location.pathname === '/dispatch/schedules/new' ||
+    location.pathname.startsWith('/dispatch/schedules/');
 
   const ROLE_DEFAULTS: Record<string, string[]> = {
     admin:          ['sales', 'purchase', 'management', 'production'],
@@ -270,6 +276,9 @@ export default function App() {
                 <Route path="/production/:productCode/new" element={<NewLogsheet />} />
                 <Route path="/production/:productCode/:id" element={<LogsheetDetail />} />
                 <Route path="/production/:productCode" element={<LogsheetList />} />
+                <Route path="/dispatch/schedules" element={<DispatchSchedulesList />} />
+                <Route path="/dispatch/schedules/new" element={<NewDispatchSchedule />} />
+                <Route path="/dispatch/schedules/:id" element={<DispatchScheduleDetail />} />
                 <Route path="/inventory" element={<ComingSoon label="Inventory" />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>

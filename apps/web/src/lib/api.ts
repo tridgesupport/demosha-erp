@@ -168,6 +168,34 @@ export const uploadSignature = (userId: string, file: File) => {
   return fetch(`${BASE_URL}/api/auth/users/${userId}/signature`, { method: 'PATCH', headers: getAuthHeader(), body: fd }).then(r => r.json());
 };
 
+// Dispatch Schedules
+export const fetchDispatchSchedules = (page = 1, limit = 50) =>
+  request(`/api/dispatch-schedules${buildParams(undefined, { page, limit })}`);
+
+export const fetchDispatchSchedule = (id: string) =>
+  request(`/api/dispatch-schedules/${id}`);
+
+export const fetchEligibleOrders = () =>
+  request('/api/dispatch-schedules/eligible-orders');
+
+export const createDispatchSchedule = (body: unknown) =>
+  request('/api/dispatch-schedules', { method: 'POST', body: JSON.stringify(body) });
+
+export const updateDispatchSchedule = (id: string, body: unknown) =>
+  request(`/api/dispatch-schedules/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+
+export const updateDispatchScheduleLine = (scheduleId: string, lineId: string, body: unknown) =>
+  request(`/api/dispatch-schedules/${scheduleId}/lines/${lineId}`, { method: 'PATCH', body: JSON.stringify(body) });
+
+export const uploadDispatchSchedulePdf = (scheduleId: string, file: Blob) => {
+  const fd = new FormData();
+  fd.append('file', file, 'dispatch_schedule.pdf');
+  return fetch(`${BASE_URL}/api/dispatch-schedules/${scheduleId}/upload-pdf`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
+};
+
+export const deleteDispatchSchedule = (id: string) =>
+  request(`/api/dispatch-schedules/${id}`, { method: 'DELETE' });
+
 // Auth — password & reset flows
 export const updateProfile = (name: string) =>
   request('/api/auth/profile', { method: 'PATCH', body: JSON.stringify({ name }) });

@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { usePurchaseIndent, useUpdatePurchaseIndentStatus, useReviseIndent } from '@/hooks/usePurchaseIndents';
 import { useAuth } from '@/context/AuthContext';
 import IndentPdf from '@/components/IndentPdf';
-import { ArrowLeft, CheckCircle, ShoppingCart, Printer, ThumbsUp, RefreshCw } from 'lucide-react';
+import { ArrowLeft, CheckCircle, ShoppingCart, Printer, ThumbsUp, RefreshCw, ExternalLink } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 
@@ -26,6 +26,28 @@ const STATUS_COLORS: Record<string, string> = {
 const COMPANY_LABELS: Record<string, string> = {
   DCPL: 'Demosha Chemicals Pvt. Ltd.',
   WIC: 'Western India Chemicals',
+};
+
+const PO_STATUS_LABELS: Record<string, string> = {
+  draft: 'Approval Pending',
+  sent: 'Approval Pending',
+  pending_approval: 'Approval Pending',
+  approved: 'Approved',
+  sent_to_vendor: 'Sent to Vendor',
+  dispatched_by_supplier: 'Dispatched by Supplier',
+  received: 'Received',
+  cancelled: 'Cancelled',
+};
+
+const PO_STATUS_COLORS: Record<string, string> = {
+  draft: 'bg-amber-100 text-amber-700',
+  sent: 'bg-amber-100 text-amber-700',
+  pending_approval: 'bg-amber-100 text-amber-700',
+  approved: 'bg-indigo-100 text-indigo-700',
+  sent_to_vendor: 'bg-orange-100 text-orange-700',
+  dispatched_by_supplier: 'bg-cyan-100 text-cyan-700',
+  received: 'bg-green-100 text-green-700',
+  cancelled: 'bg-red-100 text-red-700',
 };
 
 export default function IndentDetail() {
@@ -235,6 +257,33 @@ export default function IndentDetail() {
           </div>
         )}
       </div>
+
+      {/* Linked purchase order(s) */}
+      {(indent.purchase_orders ?? []).length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-lg p-5">
+          <h2 className="text-sm font-semibold text-gray-700 mb-3">Purchase Order</h2>
+          <div className="space-y-2">
+            {(indent.purchase_orders as any[]).map((po) => (
+              <div key={po.order_id} className="flex items-center justify-between gap-3 flex-wrap">
+                <div className="flex items-center gap-2">
+                  <Link to={`/purchase/orders/${po.order_id}`} className="text-blue-600 hover:underline font-medium text-sm">
+                    {po.po_number}
+                  </Link>
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${PO_STATUS_COLORS[po.status] ?? 'bg-gray-100 text-gray-600'}`}>
+                    {PO_STATUS_LABELS[po.status] ?? po.status}
+                  </span>
+                </div>
+                {po.dispatch_document_url && (
+                  <a href={po.dispatch_document_url} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 px-3 py-1 border border-cyan-300 text-cyan-700 rounded text-xs hover:bg-cyan-50">
+                    <ExternalLink className="w-3.5 h-3.5" /> Dispatch Document
+                  </a>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Line items */}
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">

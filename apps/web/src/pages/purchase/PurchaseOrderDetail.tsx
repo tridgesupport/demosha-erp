@@ -4,12 +4,12 @@ import { usePurchaseOrder, useUpdatePurchaseOrderStatus } from '@/hooks/usePurch
 import { useAuth } from '@/context/AuthContext';
 import { useQueryClient } from '@tanstack/react-query';
 import PurchaseOrderPdf from '@/components/PurchaseOrderPdf';
-import { uploadPoPdf, uploadApprovedPo } from '@/lib/api';
-import { ArrowLeft, CheckCircle, Printer, Upload, ExternalLink, Truck, Package } from 'lucide-react';
+import { uploadPoPdf, uploadApprovedPo, uploadDispatchDoc } from '@/lib/api';
+import { ArrowLeft, CheckCircle, Printer, Upload, ExternalLink, Truck, PackageCheck, Package } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 
-const STATUS_FLOW = ['pending_approval', 'approved', 'sent_to_vendor', 'received'];
+const STATUS_FLOW = ['pending_approval', 'approved', 'sent_to_vendor', 'dispatched_by_supplier', 'received'];
 
 const STATUS_LABELS: Record<string, string> = {
   draft: 'Approval Pending',
@@ -17,6 +17,7 @@ const STATUS_LABELS: Record<string, string> = {
   pending_approval: 'Approval Pending',
   approved: 'Approved',
   sent_to_vendor: 'Sent to Vendor',
+  dispatched_by_supplier: 'Dispatched by Supplier',
   received: 'Received',
   cancelled: 'Cancelled',
 };
@@ -27,6 +28,7 @@ const STATUS_COLORS: Record<string, string> = {
   pending_approval: 'bg-amber-100 text-amber-700',
   approved: 'bg-indigo-100 text-indigo-700',
   sent_to_vendor: 'bg-orange-100 text-orange-700',
+  dispatched_by_supplier: 'bg-cyan-100 text-cyan-700',
   received: 'bg-green-100 text-green-700',
   cancelled: 'bg-red-100 text-red-700',
 };
@@ -43,6 +45,7 @@ export default function PurchaseOrderDetail() {
   const [confirming, setConfirming] = useState(false);
   const [pendingStatus, setPendingStatus] = useState<string | null>(null);
   const [grnInput, setGrnInput] = useState('');
+  const [dispatchDocFile, setDispatchDocFile] = useState<File | null>(null);
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
 
@@ -106,9 +109,14 @@ export default function PurchaseOrderDetail() {
   const confirmStatus = async () => {
     if (!pendingStatus) return;
     await updateStatus.mutateAsync({ status: pendingStatus, grn_number: pendingStatus === 'received' ? grnInput : undefined });
+    if (pendingStatus === 'dispatched_by_supplier' && dispatchDocFile) {
+      await uploadDispatchDoc(id!, dispatchDocFile);
+      queryClient.invalidateQueries({ queryKey: ['purchase-order', id] });
+    }
     setConfirming(false);
     setPendingStatus(null);
     setGrnInput('');
+    setDispatchDocFile(null);
   };
 
   const formatDate = (d: string | null) => d ? String(d).slice(0, 10).split('-').reverse().join('/') : '—';
@@ -125,7 +133,8 @@ export default function PurchaseOrderDetail() {
   const canSend         = order.status === 'draft';
   const canApprove      = ['pending_approval', 'sent'].includes(order.status) && isManagerOrAdmin;
   const canSendToVendor = order.status === 'approved';
-  const canReceive      = order.status === 'sent_to_vendor';
+  const canMarkDispatched = order.status === 'sent_to_vendor';
+  const canReceive      = order.status === 'dispatched_by_supplier';
   const canCancel       = ['pending_approval', 'draft', 'sent'].includes(order.status);
 
   return (
@@ -160,6 +169,12 @@ export default function PurchaseOrderDetail() {
             <a href={order.approved_po_url} target="_blank" rel="noreferrer"
               className="flex items-center gap-1 px-3 py-1.5 border border-green-400 text-green-700 rounded text-sm hover:bg-green-50">
               <ExternalLink className="w-4 h-4" /> Approved PO
+            </a>
+          )}
+          {order.dispatch_document_url && (
+            <a href={order.dispatch_document_url} target="_blank" rel="noreferrer"
+              className="flex items-center gap-1 px-3 py-1.5 border border-cyan-400 text-cyan-700 rounded text-sm hover:bg-cyan-50">
+              <ExternalLink className="w-4 h-4" /> Dispatch Document
             </a>
           )}
         </div>
@@ -203,6 +218,12 @@ export default function PurchaseOrderDetail() {
               <Truck className="w-4 h-4" /> Mark Sent to Vendor
             </button>
           )}
+          {canMarkDispatched && (
+            <button onClick={() => requestStatus('dispatched_by_supplier')} disabled={updateStatus.isPending}
+              className="flex items-center gap-1 px-3 py-1.5 bg-cyan-600 text-white rounded text-sm hover:bg-cyan-700 disabled:opacity-60">
+              <PackageCheck className="w-4 h-4" /> Mark Dispatched by Supplier
+            </button>
+          )}
           {canReceive && (
             <button onClick={() => requestStatus('received')} disabled={updateStatus.isPending}
               className="flex items-center gap-1 px-3 py-1.5 bg-green-600 text-white rounded text-sm hover:bg-green-700 disabled:opacity-60">
@@ -233,12 +254,21 @@ export default function PurchaseOrderDetail() {
                   className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
               </div>
             )}
+            {pendingStatus === 'dispatched_by_supplier' && (
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Dispatch Document (image or PDF, optional)</label>
+                <input type="file" accept=".pdf,.jpg,.jpeg,.png"
+                  onChange={(e) => setDispatchDocFile(e.target.files?.[0] ?? null)}
+                  className="text-xs w-full" />
+                {dispatchDocFile && <p className="text-xs text-gray-500 mt-1">{dispatchDocFile.name}</p>}
+              </div>
+            )}
             <div className="flex gap-3">
               <button onClick={confirmStatus} disabled={updateStatus.isPending}
                 className="flex-1 px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-60">
                 Confirm
               </button>
-              <button onClick={() => { setConfirming(false); setPendingStatus(null); }}
+              <button onClick={() => { setConfirming(false); setPendingStatus(null); setDispatchDocFile(null); }}
                 className="flex-1 px-4 py-2 border rounded text-sm hover:bg-gray-50">
                 Cancel
               </button>
@@ -263,6 +293,7 @@ export default function PurchaseOrderDetail() {
         <div><p className="text-xs text-gray-500 mb-0.5">Payment Terms</p><p className="font-medium">{order.payment_terms ?? '—'}</p></div>
         <div><p className="text-xs text-gray-500 mb-0.5">Freight Terms</p><p className="font-medium">{order.freight_terms ?? '—'}</p></div>
         {order.approved_by && <div><p className="text-xs text-gray-500 mb-0.5">Approved By</p><p className="font-medium">{order.approved_by}</p></div>}
+        {order.dispatched_by_supplier_at && <div><p className="text-xs text-gray-500 mb-0.5">Dispatched by Supplier On</p><p className="font-medium">{new Date(order.dispatched_by_supplier_at).toLocaleDateString()}</p></div>}
         {order.grn_number && <div><p className="text-xs text-gray-500 mb-0.5">GRN #</p><p className="font-medium">{order.grn_number}</p></div>}
         {order.received_at && <div><p className="text-xs text-gray-500 mb-0.5">Received At</p><p className="font-medium">{new Date(order.received_at).toLocaleDateString()}</p></div>}
       </div>

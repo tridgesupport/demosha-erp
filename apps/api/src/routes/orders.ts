@@ -382,6 +382,17 @@ router.post('/:id/upload-sales-bill', requireAuth, upload.single('file') as any,
   } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }
 });
 
+// Factory uploads the Lorry Receipt once the order is dispatched — sales can view/download it.
+router.post('/:id/upload-lr', requireAuth, upload.single('file') as any, async (req: Request, res: Response) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const prefix = await orderFilePrefix(req.params.id);
+    const { url, fileId } = await uploadToImagekit(req.file.buffer, `${prefix}_lr`, 'lr_documents');
+    await sql`UPDATE sales_orders SET lr_url = ${url}, lr_file_id = ${fileId} WHERE order_id = ${req.params.id}`;
+    res.json({ url, fileId });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }
+});
+
 router.post('/:id/revise', async (req: Request, res: Response) => {
   const { id } = req.params;
   try {

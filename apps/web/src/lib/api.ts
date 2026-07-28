@@ -163,6 +163,10 @@ export const uploadSalesBill = (orderId: string, file: File) => {
   const fd = new FormData(); fd.append('file', file);
   return fetch(`${BASE_URL}/api/orders/${orderId}/upload-sales-bill`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
 };
+export const uploadLr = (orderId: string, file: File) => {
+  const fd = new FormData(); fd.append('file', file);
+  return fetch(`${BASE_URL}/api/orders/${orderId}/upload-lr`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
+};
 export const uploadSignature = (userId: string, file: File) => {
   const fd = new FormData(); fd.append('file', file);
   return fetch(`${BASE_URL}/api/auth/users/${userId}/signature`, { method: 'PATCH', headers: getAuthHeader(), body: fd }).then(r => r.json());
@@ -313,6 +317,11 @@ export const uploadPoPdf = (orderId: string, file: Blob, filename: string) => {
 export const uploadApprovedPo = (orderId: string, file: File) => {
   const fd = new FormData(); fd.append('file', file);
   return fetch(`${BASE_URL}/api/purchase/orders/${orderId}/upload-approved-po`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
+};
+
+export const uploadDispatchDoc = (orderId: string, file: File) => {
+  const fd = new FormData(); fd.append('file', file);
+  return fetch(`${BASE_URL}/api/purchase/orders/${orderId}/upload-dispatch-doc`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
 };
 
 // Vendors

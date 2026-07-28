@@ -82,7 +82,7 @@ router.get('/next-number', async (req: Request, res: Response) => {
 router.get('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
-    const [indentRows, lineRows] = await Promise.all([
+    const [indentRows, lineRows, poRows] = await Promise.all([
       sql`
         SELECT i.*, fy.fy_label,
           u.signature_url  AS approver_signature_url,
@@ -101,9 +101,15 @@ router.get('/:id', async (req: Request, res: Response) => {
         WHERE l.indent_id = ${id}
         ORDER BY l.line_number
       `,
+      sql`
+        SELECT order_id, po_number, status, dispatch_document_url, dispatched_by_supplier_at
+        FROM purchase_orders
+        WHERE indent_id = ${id} AND deleted_at IS NULL
+        ORDER BY created_at DESC
+      `,
     ]);
     if (!indentRows.length) return res.status(404).json({ error: 'Indent not found' });
-    res.json({ ...indentRows[0], lines: lineRows });
+    res.json({ ...indentRows[0], lines: lineRows, purchase_orders: poRows });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch indent' });

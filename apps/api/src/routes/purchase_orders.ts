@@ -228,19 +228,20 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
 router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => {
   const { id } = req.params;
   const { status, grn_number } = req.body;
-  const VALID = ['sent', 'pending_approval', 'approved', 'sent_to_vendor', 'received', 'cancelled'];
+  const VALID = ['sent', 'pending_approval', 'approved', 'sent_to_vendor', 'dispatched_by_supplier', 'received', 'cancelled'];
   if (!VALID.includes(status)) return res.status(400).json({ error: 'Invalid status' });
 
   if (status === 'approved' && !['admin', 'manager'].includes(req.user?.role?.toLowerCase() ?? '')) {
     return res.status(403).json({ error: 'Only managers or admins can approve purchase orders' });
   }
 
-  const userEmail       = req.user?.email ?? null;
-  const isSubmission    = status === 'sent';
-  const isApproval      = status === 'approved';
-  const isSentToVendor  = status === 'sent_to_vendor';
-  const isReceived      = status === 'received';
-  const isCancelled     = status === 'cancelled';
+  const userEmail             = req.user?.email ?? null;
+  const isSubmission          = status === 'sent';
+  const isApproval            = status === 'approved';
+  const isSentToVendor        = status === 'sent_to_vendor';
+  const isDispatchedBySupplier = status === 'dispatched_by_supplier';
+  const isReceived            = status === 'received';
+  const isCancelled           = status === 'cancelled';
 
   try {
     const rows = await sql`
@@ -254,6 +255,8 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
         approved_at         = CASE WHEN ${isApproval}      THEN NOW()        ELSE approved_at END,
         sent_to_vendor_at   = CASE WHEN ${isSentToVendor}  THEN NOW()        ELSE sent_to_vendor_at END,
         sent_to_vendor_by   = CASE WHEN ${isSentToVendor}  THEN ${userEmail} ELSE sent_to_vendor_by END,
+        dispatched_by_supplier_at = CASE WHEN ${isDispatchedBySupplier} THEN NOW()        ELSE dispatched_by_supplier_at END,
+        dispatched_by_supplier_by = CASE WHEN ${isDispatchedBySupplier} THEN ${userEmail} ELSE dispatched_by_supplier_by END,
         grn_number          = CASE WHEN ${isReceived}       THEN ${grn_number ?? null} ELSE grn_number END,
         received_at         = CASE WHEN ${isReceived}       THEN NOW()        ELSE received_at END,
         received_by         = CASE WHEN ${isReceived}       THEN ${userEmail} ELSE received_by END,
@@ -293,6 +296,18 @@ router.post('/:id/upload-approved-po', requireAuth, requireRole('admin', 'manage
     const prefix = await poFilePrefix(req.params.id);
     const { url, fileId } = await uploadToImagekit(req.file.buffer, `${prefix}_approved_po.pdf`, 'purchase_orders');
     await sql`UPDATE purchase_orders SET approved_po_url = ${url}, approved_po_file_id = ${fileId} WHERE order_id = ${req.params.id}`;
+    res.json({ url, fileId });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }
+});
+
+// Purchaser attaches the supplier's dispatch proof (image or PDF) when marking the PO dispatched by supplier.
+// Visible to factory on the linked Indent.
+router.post('/:id/upload-dispatch-doc', requireAuth, upload.single('file') as any, async (req: Request, res: Response) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const prefix = await poFilePrefix(req.params.id);
+    const { url, fileId } = await uploadToImagekit(req.file.buffer, `${prefix}_dispatch_doc`, 'purchase_dispatch_docs');
+    await sql`UPDATE purchase_orders SET dispatch_document_url = ${url}, dispatch_document_file_id = ${fileId} WHERE order_id = ${req.params.id}`;
     res.json({ url, fileId });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }
 });

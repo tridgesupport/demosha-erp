@@ -7,7 +7,7 @@ import OverdueBadge from '@/components/OverdueBadge';
 import ProformaInvoice from '@/components/ProformaInvoice';
 import { useCustomerOutstanding } from '@/hooks/useCustomers';
 import { useAuth } from '@/context/AuthContext';
-import { uploadSalesBill } from '@/lib/api';
+import { uploadSalesBill, uploadLr } from '@/lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -171,6 +171,16 @@ export default function OrderDetail() {
     }
   };
 
+  const handleUploadLr = async (file: File) => {
+    setUploading('lr');
+    try {
+      await uploadLr(id!, file);
+      queryClient.invalidateQueries({ queryKey: ['order', id] });
+    } finally {
+      setUploading(null);
+    }
+  };
+
   if (isLoading) return <div className="animate-pulse h-64 bg-gray-200 rounded-lg" />;
   if (!order) return <div className="text-center py-16 text-gray-400">Order not found</div>;
 
@@ -272,6 +282,14 @@ export default function OrderDetail() {
                 {o.sales_bill_url ? 'Replace Sales Bill' : 'Upload Sales Bill'}
                 <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
                   onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} />
+              </label>
+            )}
+            {isFactory && o.status === 'dispatched' && (
+              <label className={`flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 cursor-pointer ${uploading === 'lr' ? 'opacity-50' : ''}`}>
+                <Upload className="w-4 h-4" />
+                {o.lr_url ? 'Replace LR' : 'Upload LR'}
+                <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
+                  onChange={(e) => e.target.files?.[0] && handleUploadLr(e.target.files[0])} />
               </label>
             )}
             {nextAction && o.status !== 'cancelled' && (
@@ -395,7 +413,7 @@ export default function OrderDetail() {
           </div>
 
           {/* Documents */}
-          {(o.approved_pi_url || o.sales_bill_url) && (
+          {(o.approved_pi_url || o.sales_bill_url || o.lr_url) && (
             <div className="bg-white border border-gray-200 rounded-lg p-4">
               <h3 className="font-semibold text-gray-700 text-sm mb-3">Documents</h3>
               <div className="flex flex-wrap gap-3">
@@ -409,6 +427,12 @@ export default function OrderDetail() {
                   <a href={o.sales_bill_url} target="_blank" rel="noopener noreferrer"
                     className="flex items-center gap-1.5 px-3 py-1.5 border border-orange-200 rounded text-sm text-orange-700 hover:bg-orange-50">
                     <FileText className="w-4 h-4" /> Sales Bill <ExternalLink className="w-3 h-3" />
+                  </a>
+                )}
+                {o.lr_url && (
+                  <a href={o.lr_url} target="_blank" rel="noopener noreferrer"
+                    className="flex items-center gap-1.5 px-3 py-1.5 border border-blue-200 rounded text-sm text-blue-700 hover:bg-blue-50">
+                    <FileText className="w-4 h-4" /> LR (Lorry Receipt) <ExternalLink className="w-3 h-3" />
                   </a>
                 )}
               </div>

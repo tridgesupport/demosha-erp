@@ -174,7 +174,7 @@ export default function NewOrder() {
 
     const enrichedLines = lines.map((l) => {
       const num_packages = calcNumPackages(l.qty_kg, l.qty_per_pkg);
-      return { ...l, num_packages, line_amount: calcLineAmount(num_packages, l.rate_per_mt) };
+      return { ...l, num_packages, line_amount: calcLineAmount(l.qty_kg, l.rate_per_mt) };
     });
 
     let poCopyUrl: string | null = null;

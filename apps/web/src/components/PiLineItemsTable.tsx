@@ -1,7 +1,8 @@
-import { useQuery } from '@tanstack/react-query';
+import { useEffect, useRef } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Trash2, Plus } from 'lucide-react';
 import { calcLineAmount, calcNumPackages, formatINR } from '@/lib/calculations';
-import { fetchSkus } from '@/lib/api';
+import { fetchSkus, createSku } from '@/lib/api';
 
 export interface LineItem {
   sku_id: string;
@@ -36,10 +37,16 @@ interface Props {
 }
 
 export default function PiLineItemsTable({ lines, onChange, lineErrors = {} }: Props) {
+  const queryClient = useQueryClient();
   const { data: allSkus = [] } = useQuery<any[]>({
     queryKey: ['skus-all'],
     queryFn: () => fetchSkus(''),
   });
+
+  // Latest lines, for use inside async handlers so a delayed response doesn't clobber
+  // edits made elsewhere in the table while the request was in flight.
+  const linesRef = useRef(lines);
+  useEffect(() => { linesRef.current = lines; }, [lines]);
 
   // Distinct items from catalogue
   const items = [...new Set(allSkus.map((s: any) => s.item as string))].sort();
@@ -62,17 +69,18 @@ export default function PiLineItemsTable({ lines, onChange, lineErrors = {} }: P
     );
 
   const applyLine = (idx: number, patch: Partial<LineItem>) => {
-    onChange(lines.map((l, i) => {
+    onChange(linesRef.current.map((l, i) => {
       if (i !== idx) return l;
       const next = { ...l, ...patch };
       next.num_packages = calcNumPackages(next.qty_kg, next.qty_per_pkg);
-      next.line_amount  = calcLineAmount(next.num_packages, next.rate_per_mt);
+      next.line_amount  = calcLineAmount(next.qty_kg, next.rate_per_mt);
       return next;
     }));
   };
 
-  // When any catalogue field changes: recompute description and try to match a SKU
-  const handleCatalogueField = (idx: number, patch: Partial<LineItem>) => {
+  // When item/grade/qty change: recompute description and try to match a SKU (no auto-create,
+  // since these fields fire on every keystroke/intermediate selection).
+  const matchSkuOrClear = (idx: number, patch: Partial<LineItem>) => {
     const line = lines[idx];
     const merged = { ...line, ...patch };
     const sku = findSku(merged.item, merged.grade, merged.qty_per_pkg, merged.pkg);
@@ -86,6 +94,46 @@ export default function PiLineItemsTable({ lines, onChange, lineErrors = {} }: P
       merged.full_description = computeProForma(merged.item, merged.grade, merged.qty_per_pkg, merged.pkg);
     }
     applyLine(idx, merged);
+  };
+
+  // When the pkg is selected, or qty/pkg is committed (blur): match an existing SKU, or —
+  // once item, grade, qty/pkg and pkg are all filled in and no match exists — auto-generate a
+  // new code as (largest existing legacy_code + 1).
+  const handleCatalogueField = async (idx: number, patch: Partial<LineItem>) => {
+    const line = lines[idx];
+    const merged = { ...line, ...patch };
+    const sku = findSku(merged.item, merged.grade, merged.qty_per_pkg, merged.pkg);
+    if (sku) {
+      merged.sku_id        = sku.sku_id;
+      merged.legacy_code   = String(sku.legacy_code);
+      merged.full_description = sku.pro_forma_product;
+      applyLine(idx, merged);
+      return;
+    }
+
+    merged.sku_id      = '';
+    merged.legacy_code = '';
+    merged.full_description = computeProForma(merged.item, merged.grade, merged.qty_per_pkg, merged.pkg);
+    applyLine(idx, merged);
+
+    if (!merged.item || !merged.grade || !merged.pkg || !merged.qty_per_pkg) return;
+
+    try {
+      const created: any = await createSku({
+        item: merged.item,
+        grade: merged.grade,
+        qty: merged.qty_per_pkg,
+        pkg: merged.pkg,
+      });
+      queryClient.setQueryData<any[]>(['skus-all'], (old = []) => [...old, created]);
+      applyLine(idx, {
+        sku_id:           created.sku_id,
+        legacy_code:      String(created.legacy_code),
+        full_description: created.pro_forma_product,
+      });
+    } catch (err) {
+      console.error('Failed to auto-generate SKU code', err);
+    }
   };
 
   // Code lookup (on blur)
@@ -123,7 +171,7 @@ export default function PiLineItemsTable({ lines, onChange, lineErrors = {} }: P
               <th className="py-2 text-left w-52 pr-1">Pro Forma Product</th>
               <th className="py-2 text-right w-20 pr-1">Qty (kg)</th>
               <th className="py-2 text-right w-14 pr-1">Pkgs</th>
-              <th className="py-2 text-right w-24 pr-1">Rate (₹/Pkg)</th>
+              <th className="py-2 text-right w-24 pr-1">Rate (₹/Kg)</th>
               <th className="py-2 text-right w-24">Amount (₹)</th>
               <th className="py-2 w-8"></th>
             </tr>
@@ -154,7 +202,7 @@ export default function PiLineItemsTable({ lines, onChange, lineErrors = {} }: P
                   <td className="py-2 pr-1">
                     <select
                       value={line.item}
-                      onChange={e => handleCatalogueField(idx, { item: e.target.value, grade: '', qty_per_pkg: null, pkg: '' })}
+                      onChange={e => matchSkuOrClear(idx, { item: e.target.value, grade: '', qty_per_pkg: null, pkg: '' })}
                       className={`w-full border rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 ${hasErr ? 'border-red-400' : 'border-gray-300'}`}
                     >
                       <option value="">— select item —</option>
@@ -166,7 +214,7 @@ export default function PiLineItemsTable({ lines, onChange, lineErrors = {} }: P
                   <td className="py-2 pr-1">
                     <select
                       value={line.grade}
-                      onChange={e => handleCatalogueField(idx, { grade: e.target.value, qty_per_pkg: null, pkg: '' })}
+                      onChange={e => matchSkuOrClear(idx, { grade: e.target.value, qty_per_pkg: null, pkg: '' })}
                       disabled={!line.item}
                       className="w-full border border-gray-300 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
                     >
@@ -180,7 +228,8 @@ export default function PiLineItemsTable({ lines, onChange, lineErrors = {} }: P
                     <input
                       type="number" min="0" step="any"
                       value={line.qty_per_pkg ?? ''}
-                      onChange={e => handleCatalogueField(idx, { qty_per_pkg: e.target.value ? Number(e.target.value) : null })}
+                      onChange={e => matchSkuOrClear(idx, { qty_per_pkg: e.target.value ? Number(e.target.value) : null })}
+                      onBlur={() => handleCatalogueField(idx, {})}
                       placeholder="—"
                       className="w-full border border-gray-300 rounded px-1.5 py-1 text-right focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
@@ -237,7 +286,7 @@ export default function PiLineItemsTable({ lines, onChange, lineErrors = {} }: P
 
                   {/* Amount */}
                   <td className="py-2 text-right font-medium pt-2.5">
-                    {formatINR(calcLineAmount(calcNumPackages(line.qty_kg, line.qty_per_pkg), line.rate_per_mt))}
+                    {formatINR(calcLineAmount(line.qty_kg, line.rate_per_mt))}
                   </td>
 
                   {/* Delete */}

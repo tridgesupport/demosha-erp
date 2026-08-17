@@ -1,11 +1,13 @@
 import { useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronDown, ChevronRight, CheckCircle, Clock, Printer, ArrowLeft, ThumbsUp, Send } from 'lucide-react';
+import { useQueryClient } from '@tanstack/react-query';
+import { ChevronDown, ChevronRight, CheckCircle, Clock, Download, ExternalLink, ArrowLeft, ThumbsUp, Send } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { useLogsheet, useUpdateLogsheetSection, useUpdateLogsheetStatus } from '@/hooks/useProduction';
 import { useAuth } from '@/context/AuthContext';
 import { getProductConfig, SectionConfig, FormField } from '@/lib/productionFormConfigs';
+import { uploadLogsheetPdf } from '@/lib/api';
 import LogsheetPdf from '@/components/LogsheetPdf';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -138,8 +140,9 @@ export default function LogsheetDetail() {
   const { productCode = '', id = '' } = useParams<{ productCode: string; id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const printRef = useRef<HTMLDivElement>(null);
-  const [printing, setPrinting] = useState(false);
+  const qc = useQueryClient();
+  const pdfRef = useRef<HTMLDivElement>(null);
+  const [generatingPdf, setGeneratingPdf] = useState(false);
   const [savingSection, setSavingSection] = useState<string | null>(null);
 
   const code = productCode.toUpperCase();
@@ -171,19 +174,44 @@ export default function LogsheetDetail() {
     }
   }
 
-  async function handlePrint() {
-    if (!printRef.current) return;
-    setPrinting(true);
+  async function generatePdf() {
+    if (!pdfRef.current) return;
+    setGeneratingPdf(true);
     try {
-      const canvas = await html2canvas(printRef.current, { scale: 2, useCORS: true });
-      const img    = canvas.toDataURL('image/png');
-      const pdf    = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
-      const w = pdf.internal.pageSize.getWidth();
-      const h = (canvas.height / canvas.width) * w;
-      pdf.addImage(img, 'PNG', 0, 0, w, h);
-      pdf.save(`${logsheet?.logsheet_no ?? 'logsheet'}.pdf`);
+      pdfRef.current.style.display = 'block';
+      const canvas = await html2canvas(pdfRef.current, { scale: 2, useCORS: true, allowTaint: false, logging: false });
+      pdfRef.current.style.display = 'none';
+      const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+      const imgData = canvas.toDataURL('image/jpeg', 0.92);
+      const imgW = 210;
+      const imgH = (canvas.height * imgW) / canvas.width;
+      const pageH = 297;
+      if (imgH > pageH) {
+        let y = 0;
+        while (y < imgH) {
+          if (y > 0) pdf.addPage();
+          pdf.addImage(imgData, 'JPEG', 0, -y, imgW, imgH);
+          y += pageH;
+        }
+      } else {
+        pdf.addImage(imgData, 'JPEG', 0, 0, imgW, imgH);
+      }
+      const blob = pdf.output('blob');
+
+      // Persist to the record
+      await uploadLogsheetPdf(id, blob);
+      qc.invalidateQueries({ queryKey: ['logsheet', id] });
+
+      // Also download locally
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${logsheet?.logsheet_no ?? 'logsheet'}.pdf`;
+      a.click();
+      URL.revokeObjectURL(url);
     } finally {
-      setPrinting(false);
+      if (pdfRef.current) pdfRef.current.style.display = 'none';
+      setGeneratingPdf(false);
     }
   }
 
@@ -214,12 +242,22 @@ export default function LogsheetDetail() {
         </div>
 
         <div className="flex gap-2 flex-wrap">
+          {logsheet.pdf_url && (
+            <a
+              href={logsheet.pdf_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-center gap-1 px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-600 hover:bg-gray-50"
+            >
+              <ExternalLink className="w-4 h-4" /> View PDF
+            </a>
+          )}
           <button
-            onClick={handlePrint}
-            disabled={printing}
+            onClick={generatePdf}
+            disabled={generatingPdf}
             className="flex items-center gap-1 px-3 py-1.5 border border-gray-300 rounded text-sm text-gray-600 hover:bg-gray-50 disabled:opacity-50"
           >
-            <Printer className="w-4 h-4" /> {printing ? 'Generating…' : 'Print PDF'}
+            <Download className="w-4 h-4" /> {generatingPdf ? 'Generating…' : 'Download PDF'}
           </button>
 
           {canSubmit && (
@@ -285,11 +323,9 @@ export default function LogsheetDetail() {
         ))}
       </div>
 
-      {/* Hidden print area */}
-      <div className="hidden">
-        <div ref={printRef}>
-          <LogsheetPdf logsheet={logsheet} config={config} />
-        </div>
+      {/* Hidden PDF render target — toggled to display:block only during capture */}
+      <div ref={pdfRef} style={{ display: 'none', position: 'fixed', top: 0, left: 0, zIndex: -1 }}>
+        <LogsheetPdf logsheet={logsheet} config={config} />
       </div>
     </div>
   );

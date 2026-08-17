@@ -30,6 +30,7 @@ import VendorsList from '@/pages/purchase/VendorsList';
 import LogsheetList from '@/pages/production/LogsheetList';
 import NewLogsheet from '@/pages/production/NewLogsheet';
 import LogsheetDetail from '@/pages/production/LogsheetDetail';
+import AnalyticalRegister from '@/pages/production/AnalyticalRegister';
 import DispatchSchedulesList from '@/pages/dispatch/DispatchSchedulesList';
 import NewDispatchSchedule from '@/pages/dispatch/NewDispatchSchedule';
 import DispatchScheduleDetail from '@/pages/dispatch/DispatchScheduleDetail';
@@ -66,6 +67,7 @@ const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: st
     label: 'Production',
     links: [
       { to: '/production/shs', label: 'SHS' },
+      { to: '/production/analytical-register', label: 'SHS Analytical Register' },
     ],
   },
   inventory: {
@@ -273,6 +275,7 @@ export default function App() {
                 <Route path="/purchase/orders/:id" element={<PurchaseOrderDetail />} />
                 <Route path="/purchase/vendors" element={<VendorsList />} />
                 <Route path="/purchase/stock-levels" element={<StockLevels />} />
+                <Route path="/production/analytical-register" element={<AnalyticalRegister />} />
                 <Route path="/production/:productCode/new" element={<NewLogsheet />} />
                 <Route path="/production/:productCode/:id" element={<LogsheetDetail />} />
                 <Route path="/production/:productCode" element={<LogsheetList />} />

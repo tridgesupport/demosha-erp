@@ -2,7 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchProductionProducts, fetchLogsheets, fetchLogsheet,
   createLogsheet, updateLogsheetSection, updateLogsheetStatus,
-  bulkApproveLogsheets,
+  bulkApproveLogsheets, fetchAnalyticalRegister, uploadAnalyticalRegister,
 } from '@/lib/api';
 
 export function useProductionProducts() {
@@ -61,5 +61,20 @@ export function useBulkApproveLogsheets() {
   return useMutation({
     mutationFn: (ids: string[]) => bulkApproveLogsheets(ids),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['logsheets'] }),
+  });
+}
+
+export function useAnalyticalRegister(params?: { dateFrom?: string; dateTo?: string; page?: number }) {
+  return useQuery({
+    queryKey: ['analytical-register', params],
+    queryFn: () => fetchAnalyticalRegister(params) as Promise<{ data: any[]; total: number; page: number; limit: number }>,
+  });
+}
+
+export function useUploadAnalyticalRegister() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (file: File) => uploadAnalyticalRegister(file),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['analytical-register'] }),
   });
 }

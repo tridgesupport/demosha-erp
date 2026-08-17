@@ -386,6 +386,31 @@ export const updateLogsheetStatus = (id: string, status: string) =>
 export const bulkApproveLogsheets = (ids: string[]) =>
   request('/api/production/logsheets/bulk-approve', { method: 'POST', body: JSON.stringify({ ids }) });
 
+export const uploadLogsheetPdf = (logsheetId: string, file: Blob) => {
+  const fd = new FormData();
+  fd.append('file', file, 'logsheet.pdf');
+  return fetch(`${BASE_URL}/api/production/logsheets/${logsheetId}/upload-pdf`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
+};
+
+export const fetchAnalyticalRegister = (params?: { dateFrom?: string; dateTo?: string; page?: number }) => {
+  const p = new URLSearchParams();
+  if (params?.dateFrom) p.set('dateFrom', params.dateFrom);
+  if (params?.dateTo)   p.set('dateTo',   params.dateTo);
+  if (params?.page)     p.set('page',     String(params.page));
+  const qs = p.toString();
+  return request(`/api/production/analytical-register${qs ? `?${qs}` : ''}`);
+};
+
+export const uploadAnalyticalRegister = (file: File) => {
+  const fd = new FormData();
+  fd.append('file', file, file.name);
+  return fetch(`${BASE_URL}/api/production/analytical-register/upload`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(async r => {
+    const body = await r.json();
+    if (!r.ok) throw new Error(body?.error ?? 'Upload failed');
+    return body;
+  });
+};
+
 // Catalogue SKUs
 export const fetchSkus = (search?: string) => {
   const p = new URLSearchParams({ q: search ?? '' });

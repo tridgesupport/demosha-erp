@@ -3,6 +3,7 @@ import {
   fetchProductionProducts, fetchLogsheets, fetchLogsheet,
   createLogsheet, updateLogsheetSection, updateLogsheetStatus,
   bulkApproveLogsheets, fetchAnalyticalRegister, uploadAnalyticalRegister,
+  fetchAnalyticalRegisterSummary, AnalyticalRegisterFilters,
 } from '@/lib/api';
 
 export function useProductionProducts() {
@@ -64,10 +65,17 @@ export function useBulkApproveLogsheets() {
   });
 }
 
-export function useAnalyticalRegister(params?: { dateFrom?: string; dateTo?: string; page?: number }) {
+export function useAnalyticalRegister(params?: AnalyticalRegisterFilters) {
   return useQuery({
     queryKey: ['analytical-register', params],
     queryFn: () => fetchAnalyticalRegister(params) as Promise<{ data: any[]; total: number; page: number; limit: number }>,
+  });
+}
+
+export function useAnalyticalRegisterSummary(params?: Omit<AnalyticalRegisterFilters, 'page'>) {
+  return useQuery({
+    queryKey: ['analytical-register-summary', params],
+    queryFn: () => fetchAnalyticalRegisterSummary(params) as Promise<{ totals: any; byDate: any[]; byDateGrade: any[]; byGrade: any[] }>,
   });
 }
 

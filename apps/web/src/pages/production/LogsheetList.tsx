@@ -31,7 +31,7 @@ export default function LogsheetList() {
   const [page, setPage]                 = useState(1);
   const [selected, setSelected]         = useState<Set<string>>(new Set());
 
-  const { data, isLoading } = useLogsheets({ productCode: code, status: statusFilter, dateFrom, dateTo, page });
+  const { data, isLoading, isError } = useLogsheets({ productCode: code, status: statusFilter, dateFrom, dateTo, page });
   const rows: any[]   = data?.data ?? [];
   const total: number = data?.total ?? 0;
   const totalPages    = Math.ceil(total / 50);
@@ -118,7 +118,11 @@ export default function LogsheetList() {
         )}
       </div>
 
-      {isLoading ? (
+      {isError ? (
+        <div className="bg-red-50 border border-red-200 rounded p-3 text-sm text-red-700">
+          Failed to load logsheets. Please try again or contact support if this persists.
+        </div>
+      ) : isLoading ? (
         <div className="text-gray-400 text-sm py-8">Loading…</div>
       ) : (
         <div className="overflow-x-auto rounded border border-gray-200">

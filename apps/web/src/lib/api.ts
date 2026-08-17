@@ -392,13 +392,32 @@ export const uploadLogsheetPdf = (logsheetId: string, file: Blob) => {
   return fetch(`${BASE_URL}/api/production/logsheets/${logsheetId}/upload-pdf`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
 };
 
-export const fetchAnalyticalRegister = (params?: { dateFrom?: string; dateTo?: string; page?: number }) => {
+export interface AnalyticalRegisterFilters {
+  dateFrom?: string;
+  dateTo?: string;
+  grade?: string;
+  zincUsed?: string;
+  page?: number;
+}
+
+function analyticalRegisterQuery(params?: AnalyticalRegisterFilters): string {
   const p = new URLSearchParams();
   if (params?.dateFrom) p.set('dateFrom', params.dateFrom);
   if (params?.dateTo)   p.set('dateTo',   params.dateTo);
+  if (params?.grade)    p.set('grade',    params.grade);
+  if (params?.zincUsed) p.set('zincUsed', params.zincUsed);
   if (params?.page)     p.set('page',     String(params.page));
-  const qs = p.toString();
+  return p.toString();
+}
+
+export const fetchAnalyticalRegister = (params?: AnalyticalRegisterFilters) => {
+  const qs = analyticalRegisterQuery(params);
   return request(`/api/production/analytical-register${qs ? `?${qs}` : ''}`);
+};
+
+export const fetchAnalyticalRegisterSummary = (params?: Omit<AnalyticalRegisterFilters, 'page'>) => {
+  const qs = analyticalRegisterQuery(params);
+  return request(`/api/production/analytical-register/summary${qs ? `?${qs}` : ''}`);
 };
 
 export const uploadAnalyticalRegister = (file: File) => {

@@ -289,11 +289,13 @@ router.post('/logsheets/bulk-approve', requireAuth,
 // one row per batch produced that day, then a "TOTAL :" row.
 
 router.get('/analytical-register', requireAuth, async (req: Request, res: Response) => {
-  const dateFrom = String(req.query.dateFrom ?? '').trim() || null;
-  const dateTo   = String(req.query.dateTo   ?? '').trim() || null;
-  const page     = Math.max(1, parseInt(String(req.query.page ?? '1'), 10));
-  const limit    = 100;
-  const offset   = (page - 1) * limit;
+  const dateFrom  = String(req.query.dateFrom  ?? '').trim() || null;
+  const dateTo    = String(req.query.dateTo    ?? '').trim() || null;
+  const grade     = String(req.query.grade     ?? '').trim();
+  const zincUsed  = String(req.query.zincUsed  ?? '').trim();
+  const page      = Math.max(1, parseInt(String(req.query.page ?? '1'), 10));
+  const limit     = 100;
+  const offset    = (page - 1) * limit;
 
   try {
     const rows = await sql`
@@ -301,6 +303,8 @@ router.get('/analytical-register', requireAuth, async (req: Request, res: Respon
       FROM shs_analytical_register
       WHERE (${dateFrom}::date IS NULL OR log_date >= ${dateFrom}::date)
         AND (${dateTo}::date   IS NULL OR log_date <= ${dateTo}::date)
+        AND (${grade}    = '' OR grade      = ${grade})
+        AND (${zincUsed} = '' OR zinc_used  = ${zincUsed})
       ORDER BY log_date DESC, batch_no ASC
       LIMIT ${limit} OFFSET ${offset}
     `;
@@ -309,11 +313,86 @@ router.get('/analytical-register', requireAuth, async (req: Request, res: Respon
       FROM shs_analytical_register
       WHERE (${dateFrom}::date IS NULL OR log_date >= ${dateFrom}::date)
         AND (${dateTo}::date   IS NULL OR log_date <= ${dateTo}::date)
+        AND (${grade}    = '' OR grade      = ${grade})
+        AND (${zincUsed} = '' OR zinc_used  = ${zincUsed})
     `;
     res.json({ data: rows, total: countRows[0].total, page, limit });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch analytical register' });
+  }
+});
+
+// Aggregated overview: totals, production by date x grade, mesh-pass %ages
+// and yield ratio over time, and grade totals — all respecting the same
+// filters as the list endpoint above.
+router.get('/analytical-register/summary', requireAuth, async (req: Request, res: Response) => {
+  const dateFrom = String(req.query.dateFrom ?? '').trim() || null;
+  const dateTo   = String(req.query.dateTo   ?? '').trim() || null;
+  const grade    = String(req.query.grade    ?? '').trim();
+  const zincUsed = String(req.query.zincUsed ?? '').trim();
+
+  try {
+    const [totalsRows, byDateRows, byDateGradeRows, byGradeRows] = await Promise.all([
+      sql`
+        SELECT
+          COUNT(*)::int                AS batches,
+          COALESCE(SUM(quantity_kgs), 0)  AS quantity_kgs,
+          AVG(yr)                      AS avg_yr,
+          AVG(pct_age)                 AS avg_pct_age
+        FROM shs_analytical_register
+        WHERE (${dateFrom}::date IS NULL OR log_date >= ${dateFrom}::date)
+          AND (${dateTo}::date   IS NULL OR log_date <= ${dateTo}::date)
+          AND (${grade}    = '' OR grade     = ${grade})
+          AND (${zincUsed} = '' OR zinc_used = ${zincUsed})
+      `,
+      sql`
+        SELECT
+          log_date,
+          COALESCE(SUM(quantity_kgs), 0) AS quantity_kgs,
+          AVG(passes_240_pct)            AS avg_passes_240,
+          AVG(passes_150_pct)            AS avg_passes_150,
+          AVG(passes_44_pct)             AS avg_passes_44,
+          AVG(yr)                        AS avg_yr
+        FROM shs_analytical_register
+        WHERE (${dateFrom}::date IS NULL OR log_date >= ${dateFrom}::date)
+          AND (${dateTo}::date   IS NULL OR log_date <= ${dateTo}::date)
+          AND (${grade}    = '' OR grade     = ${grade})
+          AND (${zincUsed} = '' OR zinc_used = ${zincUsed})
+        GROUP BY log_date
+        ORDER BY log_date ASC
+      `,
+      sql`
+        SELECT log_date, COALESCE(grade, 'Ungraded') AS grade, COALESCE(SUM(quantity_kgs), 0) AS quantity_kgs
+        FROM shs_analytical_register
+        WHERE (${dateFrom}::date IS NULL OR log_date >= ${dateFrom}::date)
+          AND (${dateTo}::date   IS NULL OR log_date <= ${dateTo}::date)
+          AND (${grade}    = '' OR grade     = ${grade})
+          AND (${zincUsed} = '' OR zinc_used = ${zincUsed})
+        GROUP BY log_date, COALESCE(grade, 'Ungraded')
+        ORDER BY log_date ASC
+      `,
+      sql`
+        SELECT COALESCE(grade, 'Ungraded') AS grade, COUNT(*)::int AS batches, COALESCE(SUM(quantity_kgs), 0) AS quantity_kgs
+        FROM shs_analytical_register
+        WHERE (${dateFrom}::date IS NULL OR log_date >= ${dateFrom}::date)
+          AND (${dateTo}::date   IS NULL OR log_date <= ${dateTo}::date)
+          AND (${grade}    = '' OR grade     = ${grade})
+          AND (${zincUsed} = '' OR zinc_used = ${zincUsed})
+        GROUP BY COALESCE(grade, 'Ungraded')
+        ORDER BY quantity_kgs DESC
+      `,
+    ]);
+
+    res.json({
+      totals: totalsRows[0],
+      byDate: byDateRows,
+      byDateGrade: byDateGradeRows,
+      byGrade: byGradeRows,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch analytical register summary' });
   }
 });
 

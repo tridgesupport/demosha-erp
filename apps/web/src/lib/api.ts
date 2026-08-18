@@ -503,3 +503,8 @@ export const fetchInventoryTrend = (p?: AnalyticsParams) => request(`/api/analyt
 export const fetchAnalyticsFilterOptions = (dimension: string): Promise<string[]> => request(`/api/analytics/filters/${dimension}`);
 export const fetchAnalyticsPeriods = (): Promise<{ period_type: Granularity; period_label: string; period_end: string }[]> =>
   request('/api/analytics/periods');
+
+// Refresh the materialized views behind Sales/Purchase invoice totals and
+// the Balance Sheet/Inventory trend charts, after a new Tally data sync.
+export const refreshAnalyticsData = (): Promise<{ ok: boolean; totalMs: number; refreshedAt: string }> =>
+  request('/api/analytics/refresh', { method: 'POST' });

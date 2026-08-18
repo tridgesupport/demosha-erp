@@ -54,8 +54,9 @@ LEFT JOIN tally_analytics.v_item_dim id ON id.name = i.item;
 COMMENT ON VIEW tally_analytics.v_inventory_movement_fact IS
   'Every stock in/out line. For Purchase (in) and Sales (out) the sign is clean and verified. For Stock Journal/PRODUCTION, this company uses multi-SKU repackaging (the same chemical under many pack-size items) and a spot-check found the simple positive=in/negative=out reading does not always net to Tally''s own closing quantity for those items — treat Stock Journal rows as an activity log, not a reliable running balance. See v_inventory_period_balance and README.';
 
--- MATERIALIZED for the same performance reason as v_ledger_period_balance.
--- Refresh after each data sync with:
+-- MATERIALIZED, and built the same forward-fill way as
+-- v_ledger_period_balance (050) for the same ~100x speedup — see that
+-- file's comment for why. Refresh after each data sync with:
 --   REFRESH MATERIALIZED VIEW tally_analytics.v_inventory_period_balance;
 DROP MATERIALIZED VIEW IF EXISTS tally_analytics.v_inventory_period_balance CASCADE;
 DROP VIEW IF EXISTS tally_analytics.v_inventory_period_balance CASCADE;
@@ -65,25 +66,28 @@ WITH per_date AS (
   FROM tally_analytics.v_inventory_movement_fact
   GROUP BY item, date
 ),
-running AS MATERIALIZED (
-  SELECT item, date, SUM(day_delta) OVER (PARTITION BY item ORDER BY date) AS cum_delta
+events AS MATERIALIZED (
+  SELECT item, date AS event_date, day_delta AS delta,
+         false AS is_marker, NULL::text AS period_type, NULL::text AS period_label
   FROM per_date
+  UNION ALL
+  SELECT id.name, p.period_end, 0, true, p.period_type, p.period_label
+  FROM tally_analytics.v_period_end p
+  CROSS JOIN tally_analytics.v_item_dim id
 ),
-opening AS (
-  SELECT name AS item, opening_balance FROM tally_analytics.v_item_dim
+running AS (
+  SELECT item, event_date, is_marker, period_type, period_label,
+    SUM(delta) OVER (PARTITION BY item ORDER BY event_date, is_marker
+                      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cum_delta
+  FROM events
 )
 SELECT
-  p.period_type, p.period_end, p.period_label,
-  o.item,
-  o.opening_balance + COALESCE(r.cum_delta, 0) AS quantity_balance
-FROM tally_analytics.v_period_end p
-CROSS JOIN opening o
-LEFT JOIN LATERAL (
-  SELECT cum_delta FROM running
-  WHERE running.item = o.item AND running.date <= p.period_end
-  ORDER BY running.date DESC
-  LIMIT 1
-) r ON true;
+  r.period_type, r.event_date AS period_end, r.period_label,
+  r.item,
+  id.opening_balance + r.cum_delta AS quantity_balance
+FROM running r
+JOIN tally_analytics.v_item_dim id ON id.name = r.item
+WHERE r.is_marker;
 
 CREATE INDEX IF NOT EXISTS v_inventory_period_balance_idx
   ON tally_analytics.v_inventory_period_balance (period_type, item);

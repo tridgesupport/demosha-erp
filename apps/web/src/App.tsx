@@ -15,7 +15,6 @@ import OrderDetail from '@/pages/orders/OrderDetail';
 import CustomersList from '@/pages/customers/CustomersList';
 import CustomerDetail from '@/pages/customers/CustomerDetail';
 import Products from '@/pages/catalog/Products';
-import Outstanding from '@/pages/finance/Outstanding';
 import Settings from '@/pages/Settings';
 import SundryDebtors from '@/pages/finance/SundryDebtors';
 import SundryCreditors from '@/pages/finance/SundryCreditors';
@@ -34,6 +33,13 @@ import AnalyticalRegister from '@/pages/production/AnalyticalRegister';
 import DispatchSchedulesList from '@/pages/dispatch/DispatchSchedulesList';
 import NewDispatchSchedule from '@/pages/dispatch/NewDispatchSchedule';
 import DispatchScheduleDetail from '@/pages/dispatch/DispatchScheduleDetail';
+import SalesAnalysis from '@/pages/analytics/SalesAnalysis';
+import PurchaseAnalysis from '@/pages/analytics/PurchaseAnalysis';
+import AnalyticsOutstanding from '@/pages/analytics/Outstanding';
+import ProfitAndLoss from '@/pages/analytics/ProfitAndLoss';
+import BalanceSheet from '@/pages/analytics/BalanceSheet';
+import CashFlow from '@/pages/analytics/CashFlow';
+import AnalyticsInventory from '@/pages/analytics/Inventory';
 
 const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: string; exact?: boolean }[] }> = {
   sales: {
@@ -59,8 +65,19 @@ const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: st
   management: {
     label: 'Management',
     links: [
-      { to: '/finance/outstanding', label: 'Finance' },
       { to: '/dispatch/schedules', label: 'Dispatch Schedules' },
+    ],
+  },
+  analytics: {
+    label: 'Analytics',
+    links: [
+      { to: '/analytics/sales', label: 'Sales' },
+      { to: '/analytics/purchase', label: 'Purchase' },
+      { to: '/analytics/outstanding', label: 'Outstanding' },
+      { to: '/analytics/pnl', label: 'Profit & Loss' },
+      { to: '/analytics/balance-sheet', label: 'Balance Sheet' },
+      { to: '/analytics/cash-flow', label: 'Cash Flow' },
+      { to: '/analytics/inventory', label: 'Inventory' },
     ],
   },
   production: {
@@ -161,12 +178,13 @@ export default function App() {
     location.pathname === '/purchase/stock-levels' ||
     location.pathname === '/purchase/vendors' ||
     location.pathname.startsWith('/production') ||
+    location.pathname.startsWith('/analytics') ||
     location.pathname === '/dispatch/schedules/new' ||
     location.pathname.startsWith('/dispatch/schedules/');
 
   const ROLE_DEFAULTS: Record<string, string[]> = {
-    admin:          ['sales', 'purchase', 'management', 'production'],
-    manager:        ['sales', 'purchase', 'management', 'production'],
+    admin:          ['sales', 'purchase', 'management', 'production', 'analytics'],
+    manager:        ['sales', 'purchase', 'management', 'production', 'analytics'],
     salesperson:    ['sales'],
     factory:        ['purchase', 'management', 'production'],
     plant_incharge: ['production'],
@@ -263,7 +281,15 @@ export default function App() {
                 <Route path="/customers" element={<CustomersList />} />
                 <Route path="/customers/:id" element={<CustomerDetail />} />
                 <Route path="/catalog/products" element={<Products />} />
-                <Route path="/finance/outstanding" element={<Outstanding />} />
+                {/* Retired in favor of the live Analytics -> Outstanding page; redirect keeps old links/bookmarks working. */}
+                <Route path="/finance/outstanding" element={<Navigate to="/analytics/outstanding" replace />} />
+                <Route path="/analytics/sales" element={<SalesAnalysis />} />
+                <Route path="/analytics/purchase" element={<PurchaseAnalysis />} />
+                <Route path="/analytics/outstanding" element={<AnalyticsOutstanding />} />
+                <Route path="/analytics/pnl" element={<ProfitAndLoss />} />
+                <Route path="/analytics/balance-sheet" element={<BalanceSheet />} />
+                <Route path="/analytics/cash-flow" element={<CashFlow />} />
+                <Route path="/analytics/inventory" element={<AnalyticsInventory />} />
                 <Route path="/sales/debtors" element={<SundryDebtors />} />
                 <Route path="/purchase/creditors" element={<SundryCreditors />} />
                 <Route path="/settings" element={<Settings />} />

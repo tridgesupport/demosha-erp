@@ -1,6 +1,16 @@
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import * as api from '@/lib/api';
 import { AnalyticsParams } from '@/lib/api';
+
+// Refresh the materialized views, then invalidate every analytics query so
+// the whole tab re-fetches with the new data — no manual page reload needed.
+export const useRefreshAnalyticsData = () => {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => api.refreshAnalyticsData(),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['analytics'] }),
+  });
+};
 
 // Sales
 export const useSalesSummary = (p?: AnalyticsParams) =>

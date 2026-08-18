@@ -31,25 +31,30 @@ They're all `CREATE OR REPLACE VIEW` (idempotent — safe to re-run anytime).
 **Four views are MATERIALIZED** (physically stored, not live) because they're
 too expensive/plan-unstable to recompute on every query: `v_sales_invoice_fact`,
 `v_purchase_invoice_fact`, `v_ledger_period_balance`, and
-`v_inventory_period_balance`. After you pull fresh Tally data into
-`tallydb-fy25-27`, refresh them:
+`v_inventory_period_balance`. All four were rewritten to a single
+forward-fill window-function pass instead of a per-(ledger,period) LATERAL
+lookup — refreshing all four together now takes a few seconds (was ~2
+minutes for the naive version), so it's safe to trigger synchronously from
+the app rather than needing a background job.
 
-```sql
-REFRESH MATERIALIZED VIEW tally_analytics.v_sales_invoice_fact;
-REFRESH MATERIALIZED VIEW tally_analytics.v_purchase_invoice_fact;
-REFRESH MATERIALIZED VIEW tally_analytics.v_ledger_period_balance;
-REFRESH MATERIALIZED VIEW tally_analytics.v_inventory_period_balance;
-```
+After pulling fresh Tally data into `tallydb-fy25-27`, either:
+- Click **Refresh Data** in the Analytics tab's sub-nav (calls
+  `POST /api/analytics/refresh`, admin/manager only) — this is the normal way.
+- Or run directly against the database if you're not going through the app:
+  ```sql
+  REFRESH MATERIALIZED VIEW tally_analytics.v_sales_invoice_fact;
+  REFRESH MATERIALIZED VIEW tally_analytics.v_purchase_invoice_fact;
+  REFRESH MATERIALIZED VIEW tally_analytics.v_ledger_period_balance;
+  REFRESH MATERIALIZED VIEW tally_analytics.v_inventory_period_balance;
+  ```
 
-There's also now a proper UI on top of this: the Demosha ERP app's
-**Analytics** tab (`apps/web/src/pages/analytics/`, API routes in
+There's a proper UI on top of all this: the Demosha ERP app's **Analytics**
+tab (`apps/web/src/pages/analytics/`, API routes in
 `apps/api/src/routes/analytics.ts`), restricted to admin/manager roles by
-default. It's a thin read layer over these views — after refreshing the
-materialized views above, the app reflects the new data immediately, no
-redeploy needed.
+default.
 
 (Every other view is a normal live view and always reflects current data —
-no refresh needed.)
+no refresh needed, not even the button.)
 
 ## The Tally concepts these views are built on
 

@@ -47,10 +47,17 @@ COMMENT ON VIEW tally_analytics.v_period_end IS
 -- exact position, use v_balance_sheet_current instead, which uses
 -- Tally's own closing_balance directly with no reconstruction.
 -- ------------------------------------------------------------
--- This is a MATERIALIZED view (not a live view): the LATERAL/window-function
--- computation across ~1900 ledgers x ~37 periods is too expensive to
+-- This is a MATERIALIZED view (not a live view): still cheap enough to
+-- REFRESH on demand from the app (~1-2s), just not cheap enough to
 -- recompute on every query. Refresh after each Tally data sync with:
 --   REFRESH MATERIALIZED VIEW tally_analytics.v_ledger_period_balance;
+--
+-- Built as a single per-ledger forward-fill pass (real transaction deltas
+-- and period-end "marker" rows interleaved, one running SUM() OVER window),
+-- not a LATERAL "find the latest date <= period_end" per (ledger, period)
+-- pair — the LATERAL version was correct but took ~114s to refresh
+-- (~1900 ledgers x ~37 periods x a scan per pair); this is the same
+-- result (verified byte-identical) in ~1s.
 DROP MATERIALIZED VIEW IF EXISTS tally_analytics.v_ledger_period_balance CASCADE;
 DROP VIEW IF EXISTS tally_analytics.v_ledger_period_balance CASCADE;
 CREATE MATERIALIZED VIEW tally_analytics.v_ledger_period_balance AS
@@ -63,12 +70,7 @@ WITH per_date AS (
   WHERE vd.is_financial  -- excludes provisional/inventory-only postings (e.g. Receipt Note/GRN), see v_voucher_dim
   GROUP BY a.ledger, vd.date
 ),
-running AS MATERIALIZED (
-  SELECT ledger, date,
-    SUM(day_delta) OVER (PARTITION BY ledger ORDER BY date) AS cum_delta
-  FROM per_date
-),
-opening AS (
+opening AS MATERIALIZED (
   SELECT ld.name AS ledger,
     COALESCE(
       (SELECT SUM(CASE WHEN ld.is_debit_normal THEN -o.opening_balance ELSE o.opening_balance END)
@@ -76,20 +78,34 @@ opening AS (
       CASE WHEN ld.is_debit_normal THEN -ld.opening_balance ELSE ld.opening_balance END
     ) AS opening_natural
   FROM tally_analytics.v_ledger_dim ld
+),
+events AS MATERIALIZED (
+  -- real transaction deltas, one row per (ledger, date-with-activity)
+  SELECT ledger, date AS event_date, day_delta AS delta,
+         false AS is_marker, NULL::text AS period_type, NULL::text AS period_label
+  FROM per_date
+  UNION ALL
+  -- one zero-delta "marker" row per (ledger, period-end) we want a snapshot for
+  SELECT ld.name, p.period_end, 0, true, p.period_type, p.period_label
+  FROM tally_analytics.v_period_end p
+  CROSS JOIN tally_analytics.v_ledger_dim ld
+),
+running AS (
+  SELECT ledger, event_date, is_marker, period_type, period_label,
+    -- real-transaction rows (is_marker=false) sort before same-day markers,
+    -- so a period-end snapshot correctly includes everything dated that day
+    SUM(delta) OVER (PARTITION BY ledger ORDER BY event_date, is_marker
+                      ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS cum_delta
+  FROM events
 )
 SELECT
-  p.period_type, p.period_end, p.period_label,
+  r.period_type, r.event_date AS period_end, r.period_label,
   ld.name AS ledger, ld.primary_group, ld.is_pnl_group, ld.is_direct,
-  o.opening_natural + COALESCE(r.cum_delta, 0) AS balance
-FROM tally_analytics.v_period_end p
-CROSS JOIN tally_analytics.v_ledger_dim ld
-JOIN opening o ON o.ledger = ld.name
-LEFT JOIN LATERAL (
-  SELECT cum_delta FROM running
-  WHERE running.ledger = ld.name AND running.date <= p.period_end
-  ORDER BY running.date DESC
-  LIMIT 1
-) r ON true;
+  o.opening_natural + r.cum_delta AS balance
+FROM running r
+JOIN tally_analytics.v_ledger_dim ld ON ld.name = r.ledger
+JOIN opening o ON o.ledger = r.ledger
+WHERE r.is_marker;
 
 CREATE INDEX IF NOT EXISTS v_ledger_period_balance_idx
   ON tally_analytics.v_ledger_period_balance (period_type, primary_group);

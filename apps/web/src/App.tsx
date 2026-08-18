@@ -40,6 +40,7 @@ import ProfitAndLoss from '@/pages/analytics/ProfitAndLoss';
 import BalanceSheet from '@/pages/analytics/BalanceSheet';
 import CashFlow from '@/pages/analytics/CashFlow';
 import AnalyticsInventory from '@/pages/analytics/Inventory';
+import RefreshDataButton from '@/components/analytics/RefreshDataButton';
 
 const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: string; exact?: boolean }[] }> = {
   sales: {
@@ -248,23 +249,26 @@ export default function App() {
 
             {/* Sub-nav row */}
             {subLinks.length > 0 && (
-              <div className="max-w-screen-2xl mx-auto px-4 flex items-center gap-1 h-10">
-                {subLinks.map(({ to, label, exact }) => (
-                  <NavLink
-                    key={to}
-                    to={to}
-                    end={exact}
-                    className={({ isActive }) =>
-                      `px-3 py-1 rounded text-sm font-medium transition-colors ${
-                        isActive
-                          ? 'bg-blue-50 text-blue-700'
-                          : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'
-                      }`
-                    }
-                  >
-                    {label}
-                  </NavLink>
-                ))}
+              <div className="max-w-screen-2xl mx-auto px-4 flex items-center justify-between gap-1 h-10">
+                <div className="flex items-center gap-1">
+                  {subLinks.map(({ to, label, exact }) => (
+                    <NavLink
+                      key={to}
+                      to={to}
+                      end={exact}
+                      className={({ isActive }) =>
+                        `px-3 py-1 rounded text-sm font-medium transition-colors ${
+                          isActive
+                            ? 'bg-blue-50 text-blue-700'
+                            : 'text-gray-500 hover:bg-gray-100 hover:text-gray-800'
+                        }`
+                      }
+                    >
+                      {label}
+                    </NavLink>
+                  ))}
+                </div>
+                {activeTab === 'analytics' && <RefreshDataButton />}
               </div>
             )}
           </nav>

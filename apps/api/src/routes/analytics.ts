@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import sql from '../db/client';
+import { requireAuth, requireRole } from '../middleware/auth';
 
 const router = Router();
 
@@ -550,6 +551,34 @@ router.get('/periods', async (_req: Request, res: Response) => {
     `;
     res.json(rows);
   } catch (err) { handleErr(res, err, 'Failed to fetch periods'); }
+});
+
+// ------------------------------------------------------------
+// Refresh — brings the materialized views up to date after a new Tally
+// sync. All four together run in a few seconds (verified), so this is a
+// plain synchronous request/response, not a background job.
+// ------------------------------------------------------------
+const MATERIALIZED_VIEWS = [
+  'v_sales_invoice_fact',
+  'v_purchase_invoice_fact',
+  'v_ledger_period_balance',
+  'v_inventory_period_balance',
+] as const;
+
+router.post('/refresh', requireAuth, requireRole('admin', 'manager'), async (_req: Request, res: Response) => {
+  const started = Date.now();
+  const results: { view: string; ms: number }[] = [];
+  try {
+    for (const view of MATERIALIZED_VIEWS) {
+      const t0 = Date.now();
+      await sql.unsafe(`REFRESH MATERIALIZED VIEW tally_analytics.${view}`);
+      results.push({ view, ms: Date.now() - t0 });
+    }
+    res.json({ ok: true, totalMs: Date.now() - started, results, refreshedAt: new Date().toISOString() });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ ok: false, error: 'Refresh failed', results });
+  }
 });
 
 export default router;

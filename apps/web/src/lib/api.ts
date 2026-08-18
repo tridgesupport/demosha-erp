@@ -454,3 +454,52 @@ export const updatePackagingType = (id: number, pkg_name: string) =>
 export const deletePackagingType = (id: number) =>
   request(`/api/lookup/packaging-types/${id}`, { method: 'DELETE' });
 export const fetchPaymentTermsSuggestions = () => request('/api/lookup/payment-terms-suggestions');
+
+// ------------------------------------------------------------
+// Analytics (tally_analytics)
+// ------------------------------------------------------------
+export type Granularity = 'Month' | 'Quarter' | 'FY';
+
+export type AnalyticsParams = Record<string, string | number | null | undefined>;
+
+// Sales
+export const fetchSalesSummary = (p?: AnalyticsParams) => request(`/api/analytics/sales/summary${buildParams(undefined, p)}`);
+export const fetchSalesTrend = (p?: AnalyticsParams) => request(`/api/analytics/sales/trend${buildParams(undefined, p)}`);
+export const fetchSalesBreakdown = (by: string, p?: AnalyticsParams) => request(`/api/analytics/sales/breakdown${buildParams(undefined, { by, ...p })}`);
+export const fetchSalesRows = (p?: AnalyticsParams) => request(`/api/analytics/sales/rows${buildParams(undefined, p)}`);
+
+// Purchase
+export const fetchPurchaseSummary = (p?: AnalyticsParams) => request(`/api/analytics/purchase/summary${buildParams(undefined, p)}`);
+export const fetchPurchaseTrend = (p?: AnalyticsParams) => request(`/api/analytics/purchase/trend${buildParams(undefined, p)}`);
+export const fetchPurchaseBreakdown = (by: string, p?: AnalyticsParams) => request(`/api/analytics/purchase/breakdown${buildParams(undefined, { by, ...p })}`);
+export const fetchPurchaseRows = (p?: AnalyticsParams) => request(`/api/analytics/purchase/rows${buildParams(undefined, p)}`);
+
+// Outstanding
+export const fetchArSummary = () => request('/api/analytics/outstanding/ar');
+export const fetchArBills = (customer?: string) => request(`/api/analytics/outstanding/ar/bills${buildParams(undefined, { customer })}`);
+export const fetchApSummary = () => request('/api/analytics/outstanding/ap');
+export const fetchApBills = (vendor?: string) => request(`/api/analytics/outstanding/ap/bills${buildParams(undefined, { vendor })}`);
+
+// Profit & Loss
+export const fetchPnlSummary = (p?: AnalyticsParams) => request(`/api/analytics/pnl/summary${buildParams(undefined, p)}`);
+export const fetchPnlTrend = (p?: AnalyticsParams) => request(`/api/analytics/pnl/trend${buildParams(undefined, p)}`);
+export const fetchPnlBreakdown = (p?: AnalyticsParams) => request(`/api/analytics/pnl/breakdown${buildParams(undefined, p)}`);
+
+// Balance Sheet
+export const fetchBalanceSheetCurrent = () => request('/api/analytics/balance-sheet/current');
+export const fetchBalanceSheetTrend = (p?: AnalyticsParams) => request(`/api/analytics/balance-sheet/trend${buildParams(undefined, p)}`);
+export const fetchBalanceSheetBreakdown = (p?: AnalyticsParams) => request(`/api/analytics/balance-sheet/breakdown${buildParams(undefined, p)}`);
+
+// Cash Flow
+export const fetchCashFlowSummary = (p?: AnalyticsParams) => request(`/api/analytics/cashflow/summary${buildParams(undefined, p)}`);
+export const fetchCashFlowTrend = (p?: AnalyticsParams) => request(`/api/analytics/cashflow/trend${buildParams(undefined, p)}`);
+
+// Inventory
+export const fetchInventoryCurrent = (p?: AnalyticsParams) => request(`/api/analytics/inventory/current${buildParams(undefined, p)}`);
+export const fetchInventoryByGroup = () => request('/api/analytics/inventory/by-group');
+export const fetchInventoryTrend = (p?: AnalyticsParams) => request(`/api/analytics/inventory/trend${buildParams(undefined, p)}`);
+
+// Shared
+export const fetchAnalyticsFilterOptions = (dimension: string): Promise<string[]> => request(`/api/analytics/filters/${dimension}`);
+export const fetchAnalyticsPeriods = (): Promise<{ period_type: Granularity; period_label: string; period_end: string }[]> =>
+  request('/api/analytics/periods');

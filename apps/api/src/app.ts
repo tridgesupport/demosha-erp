@@ -15,6 +15,7 @@ import purchaseOrdersRouter from './routes/purchase_orders';
 import vendorsRouter from './routes/vendors';
 import productionRouter from './routes/production';
 import dispatchSchedulesRouter from './routes/dispatch_schedules';
+import analyticsRouter from './routes/analytics';
 
 // Single source of truth for the Express app — shared by the local dev
 // server (index.ts, via app.listen) and the Vercel serverless entrypoint
@@ -75,6 +76,16 @@ const bootstrapped = (async () => {
     ON CONFLICT DO NOTHING
   `;
 
+  // Analytics tab (Sales/Purchase/Outstanding/P&L/Balance Sheet/Cash Flow/
+  // Inventory reporting, backed by tally_analytics) — financials, so
+  // restricted to admin/manager by default. Adjustable later from Settings.
+  await sql`
+    INSERT INTO role_tab_permissions (role, tab) VALUES
+      ('admin',   'analytics'),
+      ('manager', 'analytics')
+    ON CONFLICT DO NOTHING
+  `;
+
   await sql`ALTER TABLE sales_order_lines ADD COLUMN IF NOT EXISTS full_description TEXT`;
   await sql`ALTER TABLE sales_order_lines ALTER COLUMN variant_id DROP NOT NULL`;
 })().catch((err) => {
@@ -102,6 +113,7 @@ app.use('/api/purchase/orders', purchaseOrdersRouter);
 app.use('/api/purchase/vendors', vendorsRouter);
 app.use('/api/production', productionRouter);
 app.use('/api/dispatch-schedules', dispatchSchedulesRouter);
+app.use('/api/analytics', analyticsRouter);
 
 app.get('/', (_req, res) => {
   res.json({ status: 'ok', message: 'Demosha ERP API' });

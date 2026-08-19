@@ -249,20 +249,27 @@ router.get('/sales-insights', async (req: Request, res: Response) => {
           GROUP BY o2.buyer_id, b2.party_name
           ORDER BY SUM(o2.total_amount) DESC
           LIMIT 10
+        ),
+        line_totals AS (
+          SELECT ol.order_id,
+                 SUM(ol.qty_kg)      AS qty_kg,
+                 SUM(ol.line_amount) AS line_amount
+          FROM sales_order_lines ol
+          GROUP BY ol.order_id
         )
         SELECT
           TO_CHAR(DATE_TRUNC('month', o.order_date), 'YYYY-MM')  AS month,
           CASE WHEN tc.buyer_id IS NOT NULL THEN tc.customer_name ELSE 'Other' END AS customer_bucket,
           COALESCE(SUM(o.total_amount), 0)                       AS revenue,
           CASE
-            WHEN SUM(ol.qty_kg) > 0
-            THEN SUM(ol.line_amount) / SUM(ol.qty_kg) * 1000
+            WHEN SUM(lt.qty_kg) > 0
+            THEN SUM(lt.line_amount) / SUM(lt.qty_kg) * 1000
             ELSE NULL
           END AS avg_rate_per_mt
         FROM sales_orders o
         LEFT JOIN top_customers tc ON tc.buyer_id = o.buyer_id
         LEFT JOIN customers     b  ON b.customer_id = o.buyer_id
-        LEFT JOIN sales_order_lines ol ON ol.order_id = o.order_id
+        LEFT JOIN line_totals   lt ON lt.order_id   = o.order_id
         WHERE o.deleted_at IS NULL AND o.is_cancelled = false
           AND (${dateFrom}::date IS NULL OR o.order_date >= ${dateFrom}::date)
           AND (${dateTo}::date   IS NULL OR o.order_date <= ${dateTo}::date)

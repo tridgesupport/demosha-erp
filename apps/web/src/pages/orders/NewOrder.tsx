@@ -53,6 +53,7 @@ export default function NewOrder() {
   const [freightDesc, setFreightDesc] = useState('');
   const [freightPerKg, setFreightPerKg] = useState(0);
   const [insurancePct, setInsurancePct] = useState(0.5);
+  const [saleType, setSaleType] = useState<'local' | 'export' | 'local_depot'>('local');
   const [gstType, setGstType] = useState<'IGST' | 'CGST_SGST'>('IGST');
   const [igstRate, setIgstRate] = useState(18);
   const [cgstRate, setCgstRate] = useState(9);
@@ -218,6 +219,7 @@ export default function NewOrder() {
       cgst_rate: cgstRate,
       tcs_rate: tcsRate,
       ...totals,
+      sale_type: saleType,
       schedule_notes: scheduleNotes || null,
       status,
       lines: enrichedLines,
@@ -467,6 +469,13 @@ export default function NewOrder() {
               </Field>
               <Field label="Insurance %">
                 <input type="number" step={0.01} className="input" value={insurancePct} onChange={(e) => setInsurancePct(parseFloat(e.target.value) || 0)} />
+              </Field>
+              <Field label="Sale Type">
+                <select className="input" value={saleType} onChange={(e) => setSaleType(e.target.value as 'local' | 'export' | 'local_depot')}>
+                  <option value="local">Local</option>
+                  <option value="export">Export</option>
+                  <option value="local_depot">Local Depot</option>
+                </select>
               </Field>
               <Field label="GST Type">
                 <select className="input" value={gstType} onChange={(e) => setGstType(e.target.value as 'IGST' | 'CGST_SGST')}>

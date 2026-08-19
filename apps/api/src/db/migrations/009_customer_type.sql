@@ -1,17 +1,16 @@
--- Add customer_type to customers for export/local/local_depot breakdown in Sales Dashboard
-ALTER TABLE customers
-  ADD COLUMN IF NOT EXISTS customer_type TEXT NOT NULL DEFAULT 'local';
+-- Add sale_type to sales_orders (export / local / local_depot)
+-- This captures the nature of the sale on the order itself, not the customer.
+ALTER TABLE sales_orders
+  ADD COLUMN IF NOT EXISTS sale_type TEXT NOT NULL DEFAULT 'local';
 
--- Add check constraint only if it doesn't already exist
 DO $$
 BEGIN
   IF NOT EXISTS (
-    SELECT 1 FROM pg_constraint
-    WHERE conname = 'customers_customer_type_check'
+    SELECT 1 FROM pg_constraint WHERE conname = 'sales_orders_sale_type_check'
   ) THEN
-    ALTER TABLE customers
-      ADD CONSTRAINT customers_customer_type_check
-      CHECK (customer_type IN ('export', 'local', 'local_depot'));
+    ALTER TABLE sales_orders
+      ADD CONSTRAINT sales_orders_sale_type_check
+      CHECK (sale_type IN ('export', 'local', 'local_depot'));
   END IF;
 END;
 $$;

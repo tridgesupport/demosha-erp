@@ -128,10 +128,10 @@ router.get('/sales-insights', async (req: Request, res: Response) => {
     const needsLineJoin = filterBy === 'product';
 
     const [byType, byGeography, byProduct, byCustomer, overTime] = await Promise.all([
-      // % revenue by sale type (customer_type on customers table)
+      // % revenue by sale type (sale_type column on sales_orders)
       sql`
         SELECT
-          COALESCE(b.customer_type, 'local') AS sale_type,
+          COALESCE(o.sale_type, 'local')      AS sale_type,
           COUNT(DISTINCT o.order_id)::int     AS order_count,
           COALESCE(SUM(o.total_amount), 0)   AS revenue
         FROM sales_orders o
@@ -175,7 +175,7 @@ router.get('/sales-insights', async (req: Request, res: Response) => {
           AND (${fyKey}::int     IS NULL OR o.fy_key = ${fyKey}::int)
           AND (
             ${filterBy}::text IS NULL
-            OR (${filterBy}::text = 'sale_type' AND COALESCE(b.customer_type,'local') = ${filterVal}::text)
+            OR (${filterBy}::text = 'sale_type' AND COALESCE(o.sale_type,'local') = ${filterVal}::text)
             OR (${filterBy}::text = 'customer'  AND o.buyer_id::text = ${filterVal}::text)
             OR (${filterBy}::text = 'product'   AND p.product_name = ${filterVal}::text)
           )
@@ -200,7 +200,7 @@ router.get('/sales-insights', async (req: Request, res: Response) => {
           AND (${fyKey}::int     IS NULL OR o.fy_key = ${fyKey}::int)
           AND (
             ${filterBy}::text IS NULL
-            OR (${filterBy}::text = 'sale_type' AND COALESCE(b.customer_type,'local') = ${filterVal}::text)
+            OR (${filterBy}::text = 'sale_type' AND COALESCE(o.sale_type,'local') = ${filterVal}::text)
             OR (${filterBy}::text = 'geography' AND b.primary_state_code::text = ${filterVal}::text)
             OR (${filterBy}::text = 'customer'  AND o.buyer_id::text = ${filterVal}::text)
           )
@@ -228,7 +228,7 @@ router.get('/sales-insights', async (req: Request, res: Response) => {
           AND (${fyKey}::int     IS NULL OR o.fy_key = ${fyKey}::int)
           AND (
             ${filterBy}::text IS NULL
-            OR (${filterBy}::text = 'sale_type' AND COALESCE(b.customer_type,'local') = ${filterVal}::text)
+            OR (${filterBy}::text = 'sale_type' AND COALESCE(o.sale_type,'local') = ${filterVal}::text)
             OR (${filterBy}::text = 'geography' AND b.primary_state_code::text = ${filterVal}::text)
             OR (${filterBy}::text = 'product'   AND p.product_name = ${filterVal}::text)
           )
@@ -269,7 +269,7 @@ router.get('/sales-insights', async (req: Request, res: Response) => {
           AND (${fyKey}::int     IS NULL OR o.fy_key = ${fyKey}::int)
           AND (
             ${filterBy}::text IS NULL
-            OR (${filterBy}::text = 'sale_type' AND COALESCE(b.customer_type,'local') = ${filterVal}::text)
+            OR (${filterBy}::text = 'sale_type' AND COALESCE(o.sale_type,'local') = ${filterVal}::text)
             OR (${filterBy}::text = 'geography' AND b.primary_state_code::text = ${filterVal}::text)
             OR (${filterBy}::text = 'customer'  AND o.buyer_id::text = ${filterVal}::text)
             OR (${filterBy}::text = 'product'   AND EXISTS (

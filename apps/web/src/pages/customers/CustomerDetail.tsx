@@ -85,18 +85,6 @@ export default function CustomerDetail() {
                         <input className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm" value={form[field] ?? ''} onChange={(e) => setForm({ ...form, [field]: e.target.value })} />
                       </div>
                     ))}
-                    <div>
-                      <label className="text-xs text-gray-400">Customer Type</label>
-                      <select
-                        className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm"
-                        value={form.customer_type ?? 'local'}
-                        onChange={(e) => setForm({ ...form, customer_type: e.target.value })}
-                      >
-                        <option value="local">Local</option>
-                        <option value="export">Export</option>
-                        <option value="local_depot">Local Depot</option>
-                      </select>
-                    </div>
                     <div className="col-span-2">
                       <label className="text-xs text-gray-400">Buyer Address</label>
                       <textarea className="w-full border border-gray-300 rounded px-2 py-1 mt-0.5 text-sm" rows={2} value={form.primary_address ?? ''} onChange={(e) => setForm({ ...form, primary_address: e.target.value })} />
@@ -133,7 +121,6 @@ export default function CustomerDetail() {
                     {[
                       ['GSTIN', c.gstin],
                       ['State', c.state_name],
-                      ['Type', c.customer_type ? { export: 'Export', local: 'Local', local_depot: 'Local Depot' }[c.customer_type as string] ?? c.customer_type : null],
                       ['Phone', c.contact_phone],
                       ['Email', c.contact_email],
                       ['Tally Ref', c.tally_ref],

@@ -105,8 +105,10 @@ router.post('/', async (req: Request, res: Response) => {
     gross_value, insurance_amount, freight_amount, assessable_value,
     igst_amount, cgst_amount, sgst_amount, tcs_amount, total_amount,
     schedule_notes, status = 'draft',
+    sale_type = 'local',
     lines = [],
   } = req.body;
+  const saleType = ['export','local','local_depot'].includes(sale_type) ? sale_type : 'local';
 
   try {
     const piRow     = await sql`SELECT get_next_pi_number(${fy_key}::smallint) AS pi_number`;
@@ -123,7 +125,7 @@ router.post('/', async (req: Request, res: Response) => {
         gst_type, igst_rate, cgst_rate, tcs_rate,
         gross_value, insurance_amount, freight_amount, assessable_value,
         igst_amount, cgst_amount, sgst_amount, tcs_amount, total_amount,
-        schedule_notes, status, revision_number, is_cancelled
+        schedule_notes, status, revision_number, is_cancelled, sale_type
       ) VALUES (
         ${pi_number}, ${fy_key}, ${seq_number},
         ${order_date ?? null}, ${buyer_order_date ?? null}, ${buyer_po_number ?? null}, ${po_copy_url ?? null},
@@ -140,7 +142,7 @@ router.post('/', async (req: Request, res: Response) => {
         ${assessable_value ?? 0},
         ${igst_amount ?? 0}, ${cgst_amount ?? 0}, ${sgst_amount ?? 0},
         ${tcs_amount ?? 0}, ${total_amount ?? 0},
-        ${schedule_notes ?? null}, ${status}, 0, false
+        ${schedule_notes ?? null}, ${status}, 0, false, ${saleType}
       )
       RETURNING *
     `;
@@ -236,8 +238,9 @@ router.put('/:id', async (req: Request, res: Response) => {
     gst_type, igst_rate, cgst_rate, tcs_rate,
     gross_value, insurance_amount, freight_amount, assessable_value,
     igst_amount, cgst_amount, sgst_amount, tcs_amount, total_amount,
-    schedule_notes, lines = [],
+    schedule_notes, sale_type, lines = [],
   } = req.body;
+  const saleType = ['export','local','local_depot'].includes(sale_type) ? sale_type : 'local';
 
   try {
     const orderRows = await sql`
@@ -274,6 +277,7 @@ router.put('/:id', async (req: Request, res: Response) => {
         tcs_amount         = ${tcs_amount ?? 0},
         total_amount       = ${total_amount ?? 0},
         schedule_notes     = ${schedule_notes ?? null},
+        sale_type          = ${saleType},
         updated_at         = NOW()
       WHERE order_id = ${id} AND deleted_at IS NULL
       RETURNING *
@@ -416,7 +420,7 @@ router.post('/:id/revise', async (req: Request, res: Response) => {
         gst_type, igst_rate, cgst_rate, tcs_rate,
         gross_value, insurance_amount, freight_amount, assessable_value,
         igst_amount, cgst_amount, sgst_amount, tcs_amount, total_amount,
-        schedule_notes, status, parent_order_id, revision_number, is_cancelled
+        schedule_notes, status, parent_order_id, revision_number, is_cancelled, sale_type
       ) VALUES (
         ${pi_number}, ${original.fy_key}, ${seq_number},
         ${original.order_date}, ${original.buyer_order_date}, ${original.buyer_po_number},
@@ -429,7 +433,8 @@ router.post('/:id/revise', async (req: Request, res: Response) => {
         ${original.assessable_value},
         ${original.igst_amount}, ${original.cgst_amount}, ${original.sgst_amount},
         ${original.tcs_amount}, ${original.total_amount},
-        ${original.schedule_notes}, 'draft', ${id}, ${revision_number}, false
+        ${original.schedule_notes}, 'draft', ${id}, ${revision_number}, false,
+        ${original.sale_type ?? 'local'}
       )
       RETURNING *
     `;

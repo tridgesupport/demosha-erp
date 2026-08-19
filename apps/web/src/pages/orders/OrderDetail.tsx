@@ -280,6 +280,7 @@ export default function OrderDetail() {
             <div className="grid grid-cols-3 gap-3">
               {[
                 ['Agent', o.agent_name],
+                ['Sale Type', o.sale_type === 'local_depot' ? 'Local Depot' : o.sale_type === 'export' ? 'Export' : 'Local'],
                 ['Payment Terms', o.payment_terms],
                 ['Freight', o.freight_desc],
                 ['Freight/kg', `₹${o.freight_per_kg}`],

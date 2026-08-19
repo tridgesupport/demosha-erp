@@ -55,6 +55,36 @@ async function request<T = any>(path: string, options?: RequestInit): Promise<T>
 export const fetchDashboard = (filters?: GlobalFilters) =>
   request(`/api/dashboard${buildParams(filters)}`);
 
+export type InsightsFilter = {
+  dateFrom?: string | null;
+  dateTo?: string | null;
+  fyKey?: number | null;
+  filterBy?: string | null;
+  filterValue?: string | null;
+};
+
+export const fetchSalesInsights = (params?: InsightsFilter) => {
+  const p = new URLSearchParams();
+  if (params?.dateFrom)    p.set('dateFrom',    params.dateFrom);
+  if (params?.dateTo)      p.set('dateTo',      params.dateTo);
+  if (params?.fyKey != null) p.set('fyKey',     String(params.fyKey));
+  if (params?.filterBy)    p.set('filterBy',    params.filterBy);
+  if (params?.filterValue) p.set('filterValue', params.filterValue);
+  const qs = p.toString();
+  return request(`/api/dashboard/sales-insights${qs ? `?${qs}` : ''}`);
+};
+
+export const fetchPurchaseInsights = (params?: InsightsFilter) => {
+  const p = new URLSearchParams();
+  if (params?.dateFrom)    p.set('dateFrom',    params.dateFrom);
+  if (params?.dateTo)      p.set('dateTo',      params.dateTo);
+  if (params?.fyKey != null) p.set('fyKey',     String(params.fyKey));
+  if (params?.filterBy)    p.set('filterBy',    params.filterBy);
+  if (params?.filterValue) p.set('filterValue', params.filterValue);
+  const qs = p.toString();
+  return request(`/api/dashboard/purchase-insights${qs ? `?${qs}` : ''}`);
+};
+
 // Orders
 export const fetchOrders = (filters?: GlobalFilters, page = 1, limit = 50) =>
   request(`/api/orders${buildParams(filters, { page, limit })}`);

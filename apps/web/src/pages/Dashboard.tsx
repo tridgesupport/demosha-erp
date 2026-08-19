@@ -1,11 +1,49 @@
+import { useState, useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import {
+  PieChart, Pie, Cell, Tooltip as ReTooltip, Legend,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, ResponsiveContainer,
+  LineChart, Line,
+} from 'recharts';
+import { AlertTriangle, X, TrendingUp } from 'lucide-react';
 import { useFiltersContext } from '@/context/FiltersContext';
-import { fetchDashboard } from '@/lib/api';
+import { fetchDashboard, fetchSalesInsights } from '@/lib/api';
 import { formatINR } from '@/lib/calculations';
 import FilteredKpiCard from '@/components/FilteredKpiCard';
 import StatusBadge from '@/components/StatusBadge';
 import OverdueBadge from '@/components/OverdueBadge';
 import { Link } from 'react-router-dom';
+
+// ── Palette (validated categorical, 8 hues + neutral Other) ─────────────────
+const CAT_COLORS = [
+  '#2a78d6', // 1 blue
+  '#eb6834', // 2 orange
+  '#1baf7a', // 3 aqua
+  '#eda100', // 4 yellow
+  '#e87ba4', // 5 magenta
+  '#008300', // 6 green
+  '#4a3aa7', // 7 violet
+  '#e34948', // 8 red
+];
+const OTHER_COLOR = '#9ca3af';
+
+// ── Formatters ───────────────────────────────────────────────────────────────
+function fmtCompact(v: number): string {
+  if (v >= 1e7) return `₹${(v / 1e7).toFixed(1)}Cr`;
+  if (v >= 1e5) return `₹${(v / 1e5).toFixed(1)}L`;
+  return `₹${Math.round(v).toLocaleString('en-IN')}`;
+}
+
+function fmtMonth(m: string): string {
+  const [y, mo] = m.split('-');
+  const names = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  return `${names[parseInt(mo, 10) - 1]} ${y.slice(2)}`;
+}
+
+function fmtPct(v: number, total: number): string {
+  if (!total) return '0%';
+  return `${Math.round((v / total) * 100)}%`;
+}
 
 const INDENT_STATUS_COLORS: Record<string, string> = {
   submitted: 'bg-amber-100 text-amber-700',
@@ -19,7 +57,6 @@ const INDENT_STATUS_LABELS: Record<string, string> = {
   po_raised: 'PO Raised',
   cancelled: 'Cancelled',
 };
-
 const PO_STATUS_COLORS: Record<string, string> = {
   pending_approval: 'bg-amber-100 text-amber-700',
   draft: 'bg-amber-100 text-amber-700',
@@ -39,6 +76,12 @@ const PO_STATUS_LABELS: Record<string, string> = {
   cancelled: 'Cancelled',
 };
 
+const SALE_TYPE_LABELS: Record<string, string> = {
+  export: 'Export',
+  local: 'Local',
+  local_depot: 'Local Depot',
+};
+
 function fmtRelative(ts: string | null): string {
   if (!ts) return '';
   const diff = Date.now() - new Date(ts).getTime();
@@ -49,14 +92,250 @@ function fmtRelative(ts: string | null): string {
   return `${Math.floor(hrs / 24)}d ago`;
 }
 
+// ── Cross-filter state ───────────────────────────────────────────────────────
+type SelectionType = 'sale_type' | 'geography' | 'product' | 'customer';
+type Selection = { type: SelectionType; value: string; label: string } | null;
+
+// ── Pie insight card ─────────────────────────────────────────────────────────
+type PieRow = { name: string; value: number; id?: string };
+
+function PieInsight({
+  title, data, colorOffset = 0, selection, onSelect, filterType,
+}: {
+  title: string;
+  data: PieRow[];
+  colorOffset?: number;
+  selection: Selection;
+  onSelect: (s: Selection) => void;
+  filterType: SelectionType;
+}) {
+  const total = data.reduce((s, r) => s + r.value, 0);
+  const isActive = selection !== null && selection.type === filterType;
+
+  function handleClick(entry: PieRow) {
+    if (isActive && selection?.value === (entry.id ?? entry.name)) {
+      onSelect(null);
+    } else {
+      onSelect({ type: filterType, value: entry.id ?? entry.name, label: entry.name });
+    }
+  }
+
+  const RADIAN = Math.PI / 180;
+  function renderLabel({ cx, cy, midAngle, outerRadius, index }: any) {
+    const pct = Math.round((data[index].value / total) * 100);
+    if (pct < 8) return null;
+    const r = outerRadius + 14;
+    const x = cx + r * Math.cos(-midAngle * RADIAN);
+    const y = cy + r * Math.sin(-midAngle * RADIAN);
+    return (
+      <text x={x} y={y} fill="#52514e" fontSize={10} textAnchor={x > cx ? 'start' : 'end'} dominantBaseline="central">
+        {pct}%
+      </text>
+    );
+  }
+
+  return (
+    <div className={`bg-white rounded-lg border p-3 ${isActive ? 'border-blue-400 ring-1 ring-blue-300' : 'border-gray-200'}`}>
+      <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-1">{title}</p>
+      {data.length === 0 ? (
+        <div className="h-32 flex items-center justify-center text-gray-300 text-xs">No data</div>
+      ) : (
+        <ResponsiveContainer width="100%" height={160}>
+          <PieChart>
+            <Pie
+              data={data}
+              cx="50%"
+              cy="50%"
+              innerRadius={32}
+              outerRadius={58}
+              dataKey="value"
+              onClick={(entry: any) => handleClick(entry as PieRow)}
+              labelLine={false}
+              label={renderLabel}
+              paddingAngle={2}
+            >
+              {data.map((entry, i) => {
+                const color = CAT_COLORS[(i + colorOffset) % CAT_COLORS.length];
+                const isSelected = isActive && selection?.value === (entry.id ?? entry.name);
+                const isDimmed = isActive && !isSelected;
+                return (
+                  <Cell
+                    key={i}
+                    fill={color}
+                    opacity={isDimmed ? 0.3 : 1}
+                    stroke="#fff"
+                    strokeWidth={2}
+                    style={{ cursor: 'pointer' }}
+                  />
+                );
+              })}
+            </Pie>
+            <ReTooltip
+              formatter={(value: any, name: any) => [
+                `${fmtCompact(Number(value))} (${fmtPct(Number(value), total)})`,
+                name,
+              ]}
+              contentStyle={{ fontSize: 12, borderRadius: 6 }}
+            />
+          </PieChart>
+        </ResponsiveContainer>
+      )}
+      {/* Legend below pie */}
+      <div className="mt-1 space-y-0.5">
+        {data.slice(0, 5).map((entry, i) => {
+          const color = CAT_COLORS[(i + colorOffset) % CAT_COLORS.length];
+          const isSelected = isActive && selection?.value === (entry.id ?? entry.name);
+          return (
+            <button
+              key={i}
+              onClick={() => handleClick(entry)}
+              className={`w-full flex items-center gap-1.5 text-left text-xs px-1 py-0.5 rounded transition-colors ${
+                isSelected ? 'bg-blue-50 font-semibold' : 'hover:bg-gray-50'
+              }`}
+            >
+              <span className="w-2.5 h-2.5 rounded-sm flex-shrink-0" style={{ background: color }} />
+              <span className="truncate text-gray-700">{entry.name}</span>
+              <span className="ml-auto text-gray-400 flex-shrink-0">{fmtCompact(entry.value)}</span>
+            </button>
+          );
+        })}
+        {data.length > 5 && (
+          <p className="text-xs text-gray-400 px-1">+{data.length - 5} more</p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Custom bar tooltip ────────────────────────────────────────────────────────
+function BarTooltipContent({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  const total = payload.reduce((s: number, p: any) => s + (p.value ?? 0), 0);
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg shadow p-2 text-xs min-w-[140px]">
+      <p className="font-semibold text-gray-700 mb-1">{fmtMonth(label)}</p>
+      {[...payload].reverse().map((p: any, i: number) => (
+        <div key={i} className="flex items-center gap-1.5 py-0.5">
+          <span className="w-2 h-2 rounded-sm flex-shrink-0" style={{ background: p.fill }} />
+          <span className="text-gray-600 truncate max-w-[100px]">{p.name}</span>
+          <span className="ml-auto font-medium">{fmtCompact(p.value)}</span>
+        </div>
+      ))}
+      <div className="border-t border-gray-100 mt-1 pt-1 flex justify-between font-semibold">
+        <span className="text-gray-500">Total</span>
+        <span>{fmtCompact(total)}</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Main Dashboard ────────────────────────────────────────────────────────────
 export default function Dashboard() {
   const { filters, activeCount } = useFiltersContext();
   const isFiltered = activeCount > 0;
 
+  // Cross-filter selection
+  const [selection, setSelection] = useState<Selection>(null);
+
+  // ── Main KPI query ─────────────────────────────────────────────────────────
   const { data, isLoading } = useQuery({
     queryKey: ['dashboard', filters],
     queryFn: () => fetchDashboard(filters),
   });
+
+  // ── Sales Insights query ───────────────────────────────────────────────────
+  const insightsParams = {
+    dateFrom:    filters.dateFrom ?? undefined,
+    dateTo:      filters.dateTo   ?? undefined,
+    fyKey:       filters.fyKey    ?? undefined,
+    filterBy:    selection?.type  ?? undefined,
+    filterValue: selection?.value ?? undefined,
+  };
+
+  const { data: insights } = useQuery({
+    queryKey: ['sales-insights', insightsParams],
+    queryFn:  () => fetchSalesInsights(insightsParams),
+  });
+
+  const d  = data  as any;
+  const si = insights as any;
+
+  // ── Derive pie data ────────────────────────────────────────────────────────
+  const byTypeData: PieRow[] = useMemo(() => (si?.byType ?? []).map((r: any) => ({
+    name: SALE_TYPE_LABELS[r.sale_type] ?? r.sale_type,
+    value: Number(r.revenue),
+    id: r.sale_type,
+  })), [si]);
+
+  const byGeoData: PieRow[] = useMemo(() => (si?.byGeography ?? []).slice(0, 10).map((r: any) => ({
+    name: r.state_name ?? r.state_code,
+    value: Number(r.revenue),
+    id: r.state_code,
+  })), [si]);
+
+  const byProductData: PieRow[] = useMemo(() => (si?.byProduct ?? []).slice(0, 8).map((r: any) => ({
+    name: r.product_name,
+    value: Number(r.revenue),
+  })), [si]);
+
+  const byCustomerData: PieRow[] = useMemo(() => (si?.byCustomer ?? []).slice(0, 8).map((r: any) => ({
+    name: r.customer_name,
+    value: Number(r.revenue),
+    id: r.customer_id,
+  })), [si]);
+
+  // ── Pivot overTime for stacked bar ────────────────────────────────────────
+  const { barData, barBuckets, bucketColors } = useMemo(() => {
+    const rows: any[] = si?.overTime ?? [];
+    if (rows.length === 0) return { barData: [], barBuckets: [], bucketColors: {} };
+
+    // Rank non-Other buckets by total revenue
+    const totals = new Map<string, number>();
+    rows.forEach(r => {
+      if (r.customer_bucket !== 'Other') {
+        totals.set(r.customer_bucket, (totals.get(r.customer_bucket) ?? 0) + Number(r.revenue));
+      }
+    });
+    const ranked = Array.from(totals.entries())
+      .sort((a, b) => b[1] - a[1])
+      .map(([name]) => name);
+
+    // Assign colors
+    const colors: Record<string, string> = { Other: OTHER_COLOR };
+    ranked.forEach((name, i) => { colors[name] = CAT_COLORS[i % CAT_COLORS.length]; });
+
+    // Pivot by month
+    const monthMap = new Map<string, Record<string, number>>();
+    rows.forEach(r => {
+      if (!monthMap.has(r.month)) monthMap.set(r.month, { month: r.month });
+      monthMap.get(r.month)![r.customer_bucket] = Number(r.revenue);
+    });
+
+    const data = Array.from(monthMap.values()).sort((a, b) =>
+      String(a.month) < String(b.month) ? -1 : 1
+    );
+
+    const buckets = [...ranked, ...(rows.some((r: any) => r.customer_bucket === 'Other') ? ['Other'] : [])];
+    return { barData: data, barBuckets: buckets, bucketColors: colors };
+  }, [si]);
+
+  // ── Rate over time ────────────────────────────────────────────────────────
+  const rateData = useMemo(() => {
+    const rows: any[] = si?.overTime ?? [];
+    const monthRates = new Map<string, { total_rev: number; total_qty_rate: number }>();
+    rows.forEach(r => {
+      if (!monthRates.has(r.month)) monthRates.set(r.month, { total_rev: 0, total_qty_rate: 0 });
+      if (r.avg_rate_per_mt != null) {
+        const prev = monthRates.get(r.month)!;
+        prev.total_rev += Number(r.revenue);
+        prev.total_qty_rate += Number(r.avg_rate_per_mt) * Number(r.revenue);
+      }
+    });
+    return Array.from(monthRates.entries())
+      .filter(([, v]) => v.total_rev > 0)
+      .map(([month, v]) => ({ month, rate: Math.round(v.total_qty_rate / v.total_rev) }))
+      .sort((a, b) => a.month < b.month ? -1 : 1);
+  }, [si]);
 
   if (isLoading) {
     return (
@@ -70,13 +349,22 @@ export default function Dashboard() {
     );
   }
 
-  const d = data as any;
-
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
+    <div className="space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-2">
+        <h1 className="text-2xl font-bold text-gray-900">Sales Dashboard</h1>
+        {selection && (
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-blue-50 border border-blue-200 rounded-full text-sm text-blue-700">
+            <TrendingUp className="w-3.5 h-3.5" />
+            <span>Filtered by <strong>{selection.label}</strong></span>
+            <button onClick={() => setSelection(null)} className="ml-1 text-blue-400 hover:text-blue-700">
+              <X className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )}
+      </div>
 
-      {/* KPI cards */}
+      {/* KPI Row */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <FilteredKpiCard
           label="Orders"
@@ -102,6 +390,134 @@ export default function Dashboard() {
         />
       </div>
 
+      {/* Insight Pie Charts — 2×2 */}
+      <div>
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide mb-2">
+          Click a slice to filter all charts below
+        </p>
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-3">
+          <PieInsight
+            title="By Sale Type"
+            data={byTypeData}
+            colorOffset={0}
+            selection={selection}
+            onSelect={setSelection}
+            filterType="sale_type"
+          />
+          <PieInsight
+            title="By Geography"
+            data={byGeoData}
+            colorOffset={2}
+            selection={selection}
+            onSelect={setSelection}
+            filterType="geography"
+          />
+          <PieInsight
+            title="By Product"
+            data={byProductData}
+            colorOffset={4}
+            selection={selection}
+            onSelect={setSelection}
+            filterType="product"
+          />
+          <PieInsight
+            title="By Customer"
+            data={byCustomerData}
+            colorOffset={0}
+            selection={selection}
+            onSelect={setSelection}
+            filterType="customer"
+          />
+        </div>
+      </div>
+
+      {/* Stacked Bar — Revenue by Customer over Time */}
+      {barData.length > 0 && (
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <p className="text-sm font-semibold text-gray-700 mb-3">
+            Revenue by Customer — Monthly
+            {selection?.type === 'customer' && (
+              <span className="ml-2 text-xs font-normal text-blue-600">(single customer selected)</span>
+            )}
+          </p>
+          <ResponsiveContainer width="100%" height={240}>
+            <BarChart data={barData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+              <XAxis
+                dataKey="month"
+                tickFormatter={fmtMonth}
+                tick={{ fontSize: 10, fill: '#6b7280' }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                tickFormatter={v => fmtCompact(v)}
+                tick={{ fontSize: 10, fill: '#6b7280' }}
+                axisLine={false}
+                tickLine={false}
+                width={56}
+                label={{ value: 'Revenue (₹)', angle: -90, position: 'insideLeft', offset: 8, style: { fontSize: 10, fill: '#9ca3af' } }}
+              />
+              <ReTooltip content={<BarTooltipContent />} />
+              <Legend
+                wrapperStyle={{ fontSize: 11, paddingTop: 8 }}
+                formatter={(v) => <span style={{ color: '#374151' }}>{v}</span>}
+              />
+              {barBuckets.map(bucket => (
+                <Bar
+                  key={bucket}
+                  dataKey={bucket}
+                  stackId="revenue"
+                  fill={bucketColors[bucket]}
+                  radius={bucket === barBuckets[barBuckets.length - 1] ? [2, 2, 0, 0] : [0, 0, 0, 0]}
+                />
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Rate Line — Avg Rate per MT over Time */}
+      {rateData.length > 1 && (
+        <div className="bg-white rounded-lg border border-gray-200 p-4">
+          <p className="text-sm font-semibold text-gray-700 mb-3">Avg Rate per MT — Monthly (₹/MT)</p>
+          <ResponsiveContainer width="100%" height={140}>
+            <LineChart data={rateData} margin={{ top: 4, right: 8, bottom: 0, left: 8 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="#f0f0f0" vertical={false} />
+              <XAxis
+                dataKey="month"
+                tickFormatter={fmtMonth}
+                tick={{ fontSize: 10, fill: '#6b7280' }}
+                axisLine={false}
+                tickLine={false}
+              />
+              <YAxis
+                tickFormatter={v => `₹${v.toLocaleString('en-IN')}`}
+                tick={{ fontSize: 10, fill: '#6b7280' }}
+                axisLine={false}
+                tickLine={false}
+                width={64}
+                label={{ value: 'Rate (₹/MT)', angle: -90, position: 'insideLeft', offset: 8, style: { fontSize: 10, fill: '#9ca3af' } }}
+              />
+              <ReTooltip
+                formatter={(v: any) => [`₹${Number(v).toLocaleString('en-IN')} /MT`, 'Avg Rate']}
+                contentStyle={{ fontSize: 12, borderRadius: 6 }}
+              />
+              <Line
+                type="monotone"
+                dataKey="rate"
+                name="Avg Rate"
+                stroke={CAT_COLORS[0]}
+                strokeWidth={2}
+                dot={{ r: 3, fill: CAT_COLORS[0], stroke: '#fff', strokeWidth: 2 }}
+                activeDot={{ r: 5 }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      {/* Bottom tables */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Recent Indents */}
         <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
@@ -221,7 +637,7 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* Recent orders */}
+        {/* Recent Sales Orders */}
         <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
           <div className="px-4 py-3 border-b border-gray-100 flex items-center justify-between">
             <h2 className="font-semibold text-gray-900">Recent Orders</h2>
@@ -239,9 +655,7 @@ export default function Dashboard() {
             <tbody className="divide-y divide-gray-50">
               {(d?.recentOrders ?? []).length === 0 ? (
                 <tr>
-                  <td colSpan={4} className="px-4 py-8 text-center text-gray-400">
-                    No orders found
-                  </td>
+                  <td colSpan={4} className="px-4 py-8 text-center text-gray-400">No orders found</td>
                 </tr>
               ) : (
                 (d?.recentOrders ?? []).map((o: any) => (

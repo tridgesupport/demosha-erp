@@ -55,20 +55,24 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
 router.post('/', async (req: Request, res: Response) => {
   const { party_name, gstin, primary_state_code, primary_address,
           contact_phone, contact_email, tally_ref, notes, payment_terms_days,
-          consignee_name, consignee_address, consignee_gstin, consignee_state_code } = req.body;
+          consignee_name, consignee_address, consignee_gstin, consignee_state_code,
+          customer_type } = req.body;
+  const ctype = ['export','local','local_depot'].includes(customer_type) ? customer_type : 'local';
   try {
     const rows = await sql`
       INSERT INTO customers
         (party_name, gstin, primary_state_code, primary_address,
          contact_phone, contact_email, tally_ref, notes, is_active, payment_terms_days,
-         consignee_name, consignee_address, consignee_gstin, consignee_state_code)
+         consignee_name, consignee_address, consignee_gstin, consignee_state_code,
+         customer_type)
       VALUES
         (${party_name}, ${gstin ?? null}, ${primary_state_code ?? null},
          ${primary_address ?? null}, ${contact_phone ?? null},
          ${contact_email ?? null}, ${tally_ref ?? null}, ${notes ?? null}, true,
          ${payment_terms_days != null ? parseInt(String(payment_terms_days), 10) : null},
          ${consignee_name ?? null}, ${consignee_address ?? null},
-         ${consignee_gstin ?? null}, ${consignee_state_code ?? null})
+         ${consignee_gstin ?? null}, ${consignee_state_code ?? null},
+         ${ctype})
       RETURNING *
     `;
     res.status(201).json(rows[0]);
@@ -117,7 +121,9 @@ router.put('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { party_name, gstin, primary_state_code, primary_address,
           contact_phone, contact_email, tally_ref, notes, is_active, payment_terms_days,
-          consignee_name, consignee_address, consignee_gstin, consignee_state_code } = req.body;
+          consignee_name, consignee_address, consignee_gstin, consignee_state_code,
+          customer_type } = req.body;
+  const ctype = ['export','local','local_depot'].includes(customer_type) ? customer_type : 'local';
   try {
     const rows = await sql`
       UPDATE customers SET
@@ -135,6 +141,7 @@ router.put('/:id', async (req: Request, res: Response) => {
         consignee_address    = ${consignee_address ?? null},
         consignee_gstin      = ${consignee_gstin ?? null},
         consignee_state_code = ${consignee_state_code ?? null},
+        customer_type        = ${ctype},
         updated_at           = NOW()
       WHERE customer_id = ${id} AND deleted_at IS NULL
       RETURNING *

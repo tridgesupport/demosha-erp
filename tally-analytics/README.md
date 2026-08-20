@@ -1,33 +1,47 @@
 # Tally Analytics — `tally_analytics` schema
 
-A business-analysis layer built on top of the raw Tally export in
-`"tallydb-fy25-27"`. You don't need any Tally or accounting background to
-use it — just query the views below like normal tables. This document
-explains what each view means and, importantly, **what to trust and what
-to double-check**, since real bookkeeping data is never perfectly clean.
+A business-analysis layer built on top of three raw Tally exports —
+`"tallydb-fy21-23"`, `"tallydb-fy23-25"`, and `"tallydb-fy25-27"` — combined
+into one queryable schema spanning **2021-04-01 to today**. You don't need
+any Tally or accounting background to use it — just query the views below
+like normal tables. This document explains what each view means and,
+importantly, **what to trust and what to double-check**, since real
+bookkeeping data is never perfectly clean.
 
-Everything here reads from `"tallydb-fy25-27"` only. Nothing in that
-schema was modified. Two other schemas already exist in this database
-(`tallydb-fy21-23`, `tallydb-fy23-25`) with the same table structure —
-combining all of them into one multi-year view is a deliberate next step,
-not done yet (see **Multi-year roadmap** below).
+Nothing in any of the three raw `tallydb-*` schemas was modified — this is
+a read-only layer on top of them. How the combining actually works (and two
+real bugs it took to get right) is in **Multi-year combined analytics**
+below; the rest of this document describes the view layer itself, which
+looks and behaves the same whether you're on the combined schema or looking
+at a single year directly.
 
 ## How to (re-)build this
 
-Run the numbered SQL files in order against the database:
+Three layers, in this order:
 
-```
-psql "$DATABASE_URL" -f sql/010_foundation.sql
-psql "$DATABASE_URL" -f sql/020_sales.sql
-psql "$DATABASE_URL" -f sql/030_purchase.sql
-psql "$DATABASE_URL" -f sql/040_outstanding.sql
-psql "$DATABASE_URL" -f sql/050_balance_sheet.sql
-psql "$DATABASE_URL" -f sql/060_profit_and_loss.sql
-psql "$DATABASE_URL" -f sql/070_cash_flow.sql
-psql "$DATABASE_URL" -f sql/080_inventory.sql
-```
+1. **`sql/*.sql`** — the template. Builds one full view layer (Sales,
+   Purchase, Outstanding, Balance Sheet, P&L, Cash Flow, Inventory) pointed
+   at whatever schema names are baked into the files. This is also what
+   `generate.sh` uses as its source to stamp out a per-year copy — see
+   "Multi-year combined analytics" below.
+2. **`sql-generated/<schema>/*.sql`** — per-source-year copies of the
+   template (one per raw `tallydb-fyXX-YY` export), produced by
+   `generate.sh`, not hand-written. Currently three exist as live schemas:
+   `tally_analytics_fy2123`, `tally_analytics_fy2325`, `tally_analytics_fy2527`.
+3. **`sql-combined/*.sql`** — unions the three per-source schemas into one
+   `tally_analytics` schema spanning all years. **This is the one the app
+   actually queries.**
 
-They're all `CREATE OR REPLACE VIEW` (idempotent — safe to re-run anytime).
+To rebuild everything from scratch against a fresh database, run in order:
+```
+for f in sql-generated/tally_analytics_fy2123/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
+for f in sql-generated/tally_analytics_fy2325/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
+for f in sql-generated/tally_analytics_fy2527/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
+for f in sql-combined/*.sql; do psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f "$f"; done
+```
+All of it is `CREATE OR REPLACE VIEW` (idempotent — safe to re-run anytime
+to pick up a definition change, without needing the schema-rename cutover
+again).
 **Four views are MATERIALIZED** (physically stored, not live) because they're
 too expensive/plan-unstable to recompute on every query: `v_sales_invoice_fact`,
 `v_purchase_invoice_fact`, `v_ledger_period_balance`, and
@@ -171,11 +185,109 @@ hiding them.
 
 **Inventory** — `v_inventory_current` (exact, use this for "what's in stock now"), `v_inventory_movement_fact` (transaction log), `v_inventory_period_balance` (trend, approximate — see finding #4), `v_inventory_by_group_period`.
 
-## Multi-year roadmap (not done yet)
+## Multi-year combined analytics (live)
 
-`tallydb-fy21-23` and `tallydb-fy23-25` exist with the same table
-structure. Every view here uses the same column names/grain a future
-`UNION ALL`-based combined layer would need, so extending to 5 years of
-history should be mostly mechanical: rebuild this same view set pointed
-at each schema (or parameterize it), then union the fact-level views
-together. Not started — revisit when ready to combine years.
+`tally_analytics` (the schema everything above describes, and the one the
+app actually queries) is now a **combined layer spanning 2021-04-01 to
+today** — all three raw Tally exports (`tallydb-fy21-23`, `tallydb-fy23-25`,
+`tallydb-fy25-27`) unioned together, not just the most recent one.
+
+### How it's built
+- **Per-source-year schemas**: `tally_analytics_fy2123`, `tally_analytics_fy2325`,
+  `tally_analytics_fy2527` — each a full, independent copy of the entire view
+  layer described above (`sql/*.sql`), pointed at its own raw `tallydb-fyXX-YY`
+  schema. Generated from a template (`generate.sh`), not hand-duplicated:
+  ```sh
+  ./generate.sh "tallydb-fy21-23" tally_analytics_fy2123   # -> sql-generated/tally_analytics_fy2123/*.sql
+  ./generate.sh "tallydb-fy23-25" tally_analytics_fy2325
+  ```
+  Run the emitted files in numeric order against the database to (re)build
+  a per-source schema.
+- **Combined layer** (`sql-combined/*.sql`): rebuilds `tally_analytics` as
+  `UNION ALL` across the three per-source schemas for every fact view, plus
+  its own dimension/period views. This is what the app actually queries —
+  same schema name, same view names as before, so the API code needed zero
+  changes when this went live (see "The cutover" below).
+
+### Three things that needed real care (not just `UNION ALL`)
+The three source years are **date-disjoint** (fy21-23 ends 2023-03-31,
+fy23-25 the next day to 2025-03-31, fy25-27 the next day onward — verified
+directly, zero gaps) and are the **same underlying Tally company** (shared
+GUID prefix across all three, zero GUID collisions verified) — so most
+combining really is a plain `UNION ALL`. Three exceptions:
+
+1. **Outstanding (AR/AP) must rebuild from raw bills, not union pre-aggregated
+   outstanding.** A bill raised near one schema's cutover and settled just
+   after it (e.g. raised Feb 2025 in fy23-25, paid May 2025 in fy25-27) would
+   show as wrongly-still-open in one schema and an orphaned payment in the
+   other if aggregated separately. Fixed by unioning `v_bill_fact` (the raw
+   postings) first, then re-running the open-bill aggregation on the combined
+   set — cross-boundary bills net out correctly.
+
+2. **Opening-balance rows would triple-count if unioned naively.** Each
+   per-source schema's "Opening" bill rows (from `mst_opening_bill_allocation`)
+   already restate that ledger's full cumulative history — fy23-25's opening
+   total (~₹871M) and fy25-27's (~₹940M) are each close in magnitude to
+   fy21-23's (~₹871M), confirming they re-state the same position rather than
+   add to it. Naively unioning all three would triple-count decades of
+   opening balances. Fixed with a per-*ledger* "earliest schema it actually
+   appears in" rule — not just "earliest schema overall" — since a ledger
+   first used partway through (a vendor onboarded during fy25-27, say) has no
+   earlier history to duplicate, and blanket-excluding its Opening row there
+   would wrongly zero out a real balance. (Caught exactly this case in
+   testing: "Karan Metals-Creditor", fy25-27-only, reconciled to ₹0 instead
+   of its true ~₹4.8M before this fix.) After the fix: AP reconciles to
+   Tally's own numbers for 1714/1715 vendors (99.94%) combined across all
+   5+ years; the one exception plus the ~10 remaining AR exceptions are the
+   same pre-existing forex/bad-debt-provision/ledger-rename cases already
+   documented above — e.g. "Ambica Roadlines" vs "Ambica Roadlines-OLD" are
+   two ledger names for what's evidently the same real vendor.
+
+3. **"Current position" data is never unioned/summed** — `v_balance_sheet_current`
+   and `v_inventory_current` are plain passthroughs of the latest schema
+   (`tally_analytics_fy2527`) only, since "today's balance" only means
+   anything from the most recent year. Balance Sheet/Inventory *trend* data
+   still unions safely across years (each schema's snapshots are for disjoint
+   calendar periods, so concatenating them doesn't double-count).
+
+### The cutover
+`tally_analytics` used to *be* the single fy25-27 schema. Bringing the
+combined layer live was a schema rename, not a data migration or API change:
+```sql
+ALTER SCHEMA tally_analytics RENAME TO tally_analytics_fy2527;
+ALTER SCHEMA tally_analytics_combined RENAME TO tally_analytics;
+```
+One gotcha found the hard way: PostgreSQL views resolve table/column
+references by internal OID, so a schema rename doesn't break them — but
+**SQL-language functions resolve calls to *other* SQL functions by
+schema-qualified text**, not OID. `fiscal_quarter()`'s body literally calls
+`tally_analytics.fiscal_year(...)`; after the rename that name pointed at
+the (function-less) combined schema and every endpoint touching periods
+broke until `fiscal_year()`/`fiscal_quarter()`/`month_label()` got their own
+copies added directly in `sql-combined/010_foundation.sql`.
+
+### Refreshing
+The **Refresh Data** button now refreshes all 12 materialized views (4 views
+× 3 per-source schemas) in parallel — typically **~8 seconds** total (was
+~2 minutes before the earlier LATERAL-join rewrite, and sequential
+refreshing of all 12 took ~12s before parallelizing). If you're on a hosting
+tier with a strict serverless timeout below ~10s and see refresh failures,
+that's why — either raise the function's `maxDuration` or ask before
+troubleshooting further.
+
+### Onboarding a future schema (e.g. `tallydb-fy27-29`)
+1. `./generate.sh "tallydb-fy27-29" tally_analytics_fy2729`, then run the
+   emitted files against the database.
+2. In each `sql-combined/*.sql` file, add one more `UNION ALL` branch
+   pointing at the new schema (mirroring the existing fy2123/fy2325/fy2527
+   branches) — including the "Opening" exclusion pattern in `040_outstanding.sql`
+   if the new schema isn't the earliest one.
+3. Update `source_priority`/`v_sources` in `010_foundation.sql`, and swap
+   which schema `v_balance_sheet_current`/`v_inventory_current` and the
+   `fiscal_year`/`fiscal_quarter`/`month_label` functions treat as "latest."
+4. Add the new schema to `MATERIALIZED_SCHEMAS` in
+   `apps/api/src/routes/analytics.ts`.
+5. Re-run `sql-combined/*.sql`, click **Refresh Data**, and spot-check the
+   AR/AP reconciliation views (`v_ar_reconciliation_check` /
+   `v_ap_reconciliation_check`) before trusting the new range — that's what
+   caught both cross-schema bugs above.

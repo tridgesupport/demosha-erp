@@ -30,35 +30,36 @@ SELECT
   ld.primary_group,
   ld.is_direct,
   ld.is_debit_normal,
-  SUM(pd.day_amount) AS amount
+  SUM(pd.day_amount) AS amount,
+  ld.group_name
 FROM per_date pd
 JOIN tally_analytics_fy2123.v_ledger_dim ld ON ld.name = pd.ledger
-GROUP BY month_label, fiscal_quarter, fiscal_year, ld.name, ld.primary_group, ld.is_direct, ld.is_debit_normal;
+GROUP BY month_label, fiscal_quarter, fiscal_year, ld.name, ld.primary_group, ld.is_direct, ld.is_debit_normal, ld.group_name;
 
 COMMENT ON VIEW tally_analytics_fy2123.v_pnl_ledger_period_activity IS
-  'Same as v_pnl_period_activity but one level more granular: individual ledger, not just primary_group.';
+  'Same as v_pnl_period_activity but one level more granular: individual ledger, not just primary_group. group_name is the ledger''s immediate sub-group (one level below primary_group, e.g. "Transport Raw Material" under "Purchase Accounts") for a 3-level drill-down.';
 
 CREATE OR REPLACE VIEW tally_analytics_fy2123.v_profit_and_loss_by_ledger AS
 WITH monthly AS (
-  SELECT month_label, fiscal_quarter, fiscal_year, ledger, primary_group, is_direct, is_debit_normal, SUM(amount) AS amount
+  SELECT month_label, fiscal_quarter, fiscal_year, ledger, primary_group, is_direct, is_debit_normal, group_name, SUM(amount) AS amount
   FROM tally_analytics_fy2123.v_pnl_ledger_period_activity
-  GROUP BY month_label, fiscal_quarter, fiscal_year, ledger, primary_group, is_direct, is_debit_normal
+  GROUP BY month_label, fiscal_quarter, fiscal_year, ledger, primary_group, is_direct, is_debit_normal, group_name
 ),
 by_month AS (
-  SELECT 'Month'::text AS period_type, month_label AS period_label, ledger, primary_group, is_direct, is_debit_normal, SUM(amount) AS amount
-  FROM monthly GROUP BY month_label, ledger, primary_group, is_direct, is_debit_normal
+  SELECT 'Month'::text AS period_type, month_label AS period_label, ledger, primary_group, is_direct, is_debit_normal, SUM(amount) AS amount, group_name
+  FROM monthly GROUP BY month_label, ledger, primary_group, is_direct, is_debit_normal, group_name
 ),
 by_quarter AS (
-  SELECT 'Quarter', fiscal_quarter, ledger, primary_group, is_direct, is_debit_normal, SUM(amount)
-  FROM monthly GROUP BY fiscal_quarter, ledger, primary_group, is_direct, is_debit_normal
+  SELECT 'Quarter', fiscal_quarter, ledger, primary_group, is_direct, is_debit_normal, SUM(amount), group_name
+  FROM monthly GROUP BY fiscal_quarter, ledger, primary_group, is_direct, is_debit_normal, group_name
 ),
 by_fy AS (
-  SELECT 'FY', fiscal_year, ledger, primary_group, is_direct, is_debit_normal, SUM(amount)
-  FROM monthly GROUP BY fiscal_year, ledger, primary_group, is_direct, is_debit_normal
+  SELECT 'FY', fiscal_year, ledger, primary_group, is_direct, is_debit_normal, SUM(amount), group_name
+  FROM monthly GROUP BY fiscal_year, ledger, primary_group, is_direct, is_debit_normal, group_name
 )
 SELECT * FROM by_month
 UNION ALL SELECT * FROM by_quarter
 UNION ALL SELECT * FROM by_fy;
 
 COMMENT ON VIEW tally_analytics_fy2123.v_profit_and_loss_by_ledger IS
-  'P&L drill-down leaf level: one row per ledger, per period. Filter primary_group (and is_direct) to get the ledgers within one drill-down bucket, e.g. WHERE primary_group = ''Purchase Accounts''.';
+  'P&L drill-down leaf level: one row per ledger, per period. Filter primary_group (and is_direct) to get the ledgers within one drill-down bucket, e.g. WHERE primary_group = ''Purchase Accounts''. group_name adds a 3rd drill level (primary_group -> group_name -> ledger) using the real chart-of-accounts sub-groups.';

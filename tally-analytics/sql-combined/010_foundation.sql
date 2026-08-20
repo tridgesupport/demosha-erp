@@ -159,3 +159,18 @@ ORDER BY name, source_priority DESC;
 
 COMMENT ON VIEW tally_analytics.v_item_dim IS
   'Every stock item name seen across all combined years, "latest wins" for current qty/value — see v_ledger_dim comment for the same reasoning.';
+
+CREATE OR REPLACE VIEW tally_analytics.v_stock_group_dim AS
+WITH unioned AS (
+  SELECT 1 AS source_priority, sgd.* FROM tally_analytics_fy2123.v_stock_group_dim sgd
+  UNION ALL
+  SELECT 2, sgd.* FROM tally_analytics_fy2325.v_stock_group_dim sgd
+  UNION ALL
+  SELECT 3, sgd.* FROM tally_analytics_fy2527.v_stock_group_dim sgd
+)
+SELECT DISTINCT ON (name) *
+FROM unioned
+ORDER BY name, source_priority DESC;
+
+COMMENT ON VIEW tally_analytics.v_stock_group_dim IS
+  'Every stock group name seen across all combined years, "latest wins" for parent/stock_group_parent — see v_ledger_dim comment for the same reasoning.';

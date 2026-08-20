@@ -558,6 +558,12 @@ router.get('/periods', async (_req: Request, res: Response) => {
 // sync. All four together run in a few seconds (verified), so this is a
 // plain synchronous request/response, not a background job.
 // ------------------------------------------------------------
+// `tally_analytics` itself (the combined, multi-year layer the app
+// queries) has no materialized views of its own — it's plain UNION ALL
+// views over these. The 4 materialized views live per-source-year, one
+// set per raw Tally export currently being combined; add a schema here
+// when a new year's schema gets onboarded (see tally-analytics/README.md).
+const MATERIALIZED_SCHEMAS = ['tally_analytics_fy2123', 'tally_analytics_fy2325', 'tally_analytics_fy2527'] as const;
 const MATERIALIZED_VIEWS = [
   'v_sales_invoice_fact',
   'v_purchase_invoice_fact',
@@ -567,17 +573,24 @@ const MATERIALIZED_VIEWS = [
 
 router.post('/refresh', requireAuth, requireRole('admin', 'manager'), async (_req: Request, res: Response) => {
   const started = Date.now();
-  const results: { view: string; ms: number }[] = [];
-  try {
-    for (const view of MATERIALIZED_VIEWS) {
+  // Each view is independent (different materialized view, no shared lock),
+  // so refresh them concurrently across the connection pool rather than one
+  // at a time — 12 views sequentially took ~12s in testing (borderline for
+  // a serverless function timeout on some hosting tiers); in parallel it's
+  // bounded by the slowest single view (~2-3s), not the sum of all of them.
+  const jobs = MATERIALIZED_SCHEMAS.flatMap((schema) =>
+    MATERIALIZED_VIEWS.map(async (view) => {
       const t0 = Date.now();
-      await sql.unsafe(`REFRESH MATERIALIZED VIEW tally_analytics.${view}`);
-      results.push({ view, ms: Date.now() - t0 });
-    }
+      await sql.unsafe(`REFRESH MATERIALIZED VIEW ${schema}.${view}`);
+      return { view: `${schema}.${view}`, ms: Date.now() - t0 };
+    }),
+  );
+  try {
+    const results = await Promise.all(jobs);
     res.json({ ok: true, totalMs: Date.now() - started, results, refreshedAt: new Date().toISOString() });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ ok: false, error: 'Refresh failed', results });
+    res.status(500).json({ ok: false, error: 'Refresh failed' });
   }
 });
 

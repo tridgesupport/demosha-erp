@@ -1,3 +1,4 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, NavLink, useLocation, Navigate } from 'react-router-dom';
 import { Settings as SettingsIcon } from 'lucide-react';
 import { Toaster } from '@/components/ui/toaster';
@@ -33,14 +34,32 @@ import AnalyticalRegister from '@/pages/production/AnalyticalRegister';
 import DispatchSchedulesList from '@/pages/dispatch/DispatchSchedulesList';
 import NewDispatchSchedule from '@/pages/dispatch/NewDispatchSchedule';
 import DispatchScheduleDetail from '@/pages/dispatch/DispatchScheduleDetail';
-import SalesAnalysis from '@/pages/analytics/SalesAnalysis';
-import PurchaseAnalysis from '@/pages/analytics/PurchaseAnalysis';
-import AnalyticsOutstanding from '@/pages/analytics/Outstanding';
-import ProfitAndLoss from '@/pages/analytics/ProfitAndLoss';
-import BalanceSheet from '@/pages/analytics/BalanceSheet';
-import CashFlow from '@/pages/analytics/CashFlow';
-import AnalyticsInventory from '@/pages/analytics/Inventory';
 import RefreshDataButton from '@/components/analytics/RefreshDataButton';
+
+// Lazy-loaded: the Analytics tab is restricted to admin/manager and most
+// users never open it, so its code shouldn't be in everyone else's initial
+// bundle — each of these only downloads the first time someone actually
+// navigates to /analytics/*.
+const SalesAnalysis = lazy(() => import('@/pages/analytics/SalesAnalysis'));
+const PurchaseAnalysis = lazy(() => import('@/pages/analytics/PurchaseAnalysis'));
+const AnalyticsOutstanding = lazy(() => import('@/pages/analytics/Outstanding'));
+const ProfitAndLoss = lazy(() => import('@/pages/analytics/ProfitAndLoss'));
+const BalanceSheet = lazy(() => import('@/pages/analytics/BalanceSheet'));
+const CashFlow = lazy(() => import('@/pages/analytics/CashFlow'));
+const AnalyticsInventory = lazy(() => import('@/pages/analytics/Inventory'));
+
+function AnalyticsPageLoading() {
+  return (
+    <div className="space-y-4">
+      <div className="h-8 w-48 bg-gray-200 rounded animate-pulse" />
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        {[...Array(4)].map((_, i) => (
+          <div key={i} className="h-24 bg-gray-200 rounded-lg animate-pulse" />
+        ))}
+      </div>
+    </div>
+  );
+}
 
 const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: string; exact?: boolean }[] }> = {
   sales: {
@@ -287,13 +306,13 @@ export default function App() {
                 <Route path="/catalog/products" element={<Products />} />
                 {/* Retired in favor of the live Analytics -> Outstanding page; redirect keeps old links/bookmarks working. */}
                 <Route path="/finance/outstanding" element={<Navigate to="/analytics/outstanding" replace />} />
-                <Route path="/analytics/sales" element={<SalesAnalysis />} />
-                <Route path="/analytics/purchase" element={<PurchaseAnalysis />} />
-                <Route path="/analytics/outstanding" element={<AnalyticsOutstanding />} />
-                <Route path="/analytics/pnl" element={<ProfitAndLoss />} />
-                <Route path="/analytics/balance-sheet" element={<BalanceSheet />} />
-                <Route path="/analytics/cash-flow" element={<CashFlow />} />
-                <Route path="/analytics/inventory" element={<AnalyticsInventory />} />
+                <Route path="/analytics/sales" element={<Suspense fallback={<AnalyticsPageLoading />}><SalesAnalysis /></Suspense>} />
+                <Route path="/analytics/purchase" element={<Suspense fallback={<AnalyticsPageLoading />}><PurchaseAnalysis /></Suspense>} />
+                <Route path="/analytics/outstanding" element={<Suspense fallback={<AnalyticsPageLoading />}><AnalyticsOutstanding /></Suspense>} />
+                <Route path="/analytics/pnl" element={<Suspense fallback={<AnalyticsPageLoading />}><ProfitAndLoss /></Suspense>} />
+                <Route path="/analytics/balance-sheet" element={<Suspense fallback={<AnalyticsPageLoading />}><BalanceSheet /></Suspense>} />
+                <Route path="/analytics/cash-flow" element={<Suspense fallback={<AnalyticsPageLoading />}><CashFlow /></Suspense>} />
+                <Route path="/analytics/inventory" element={<Suspense fallback={<AnalyticsPageLoading />}><AnalyticsInventory /></Suspense>} />
                 <Route path="/sales/debtors" element={<SundryDebtors />} />
                 <Route path="/purchase/creditors" element={<SundryCreditors />} />
                 <Route path="/settings" element={<Settings />} />

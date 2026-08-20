@@ -24,7 +24,9 @@ SELECT
   -i.quantity   AS quantity_sold,      -- trn_inventory.quantity is negative for sales; flip so positive = units sold
   i.rate,
   i.amount      AS sales_amount,       -- already positive for sales lines, no sign flip needed
-  i.godown
+  i.godown,
+  vd.nature     AS voucher_type_parent, -- always 'Sales' here — carried through for dashboards that span multiple natures
+  id.stock_group_parent
 FROM "tallydb-fy23-25".trn_inventory i
 JOIN tally_analytics_fy2325.v_voucher_dim vd ON vd.guid = i.guid AND vd.nature = 'Sales'
 LEFT JOIN tally_analytics_fy2325.v_item_dim id ON id.name = i.item;

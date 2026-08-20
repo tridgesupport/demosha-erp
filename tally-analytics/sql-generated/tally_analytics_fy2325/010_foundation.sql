@@ -85,6 +85,51 @@ COMMENT ON VIEW tally_analytics_fy2325.v_ledger_dim IS
   'Ledgers joined to their group''s primary_group/P&L classification. opening_balance/closing_balance are in Tally''s raw signed convention (debit = negative, credit = positive) — see README.';
 
 -- ------------------------------------------------------------
+-- Dimension: stock groups (self-referencing hierarchy)
+--
+-- mst_stock_group is Tally's own group master (name, parent), separate
+-- from mst_stock_item.parent (which only points at an item's immediate
+-- group). This walks the parent chain to the root ancestor, so items can
+-- be filtered by both their immediate group and its top-level parent
+-- (e.g. item -> "BEARINGS" -> "Store & Spares"). Root-level groups (no
+-- parent of their own) resolve stock_group_parent = their own name.
+-- ------------------------------------------------------------
+CREATE OR REPLACE VIEW tally_analytics_fy2325.v_stock_group_dim AS
+WITH RECURSIVE chain AS (
+  SELECT
+    sg.name AS leaf,
+    sg.name,
+    sg.parent,
+    0 AS depth
+  FROM "tallydb-fy23-25".mst_stock_group sg
+  UNION ALL
+  SELECT
+    c.leaf,
+    g.name,
+    g.parent,
+    c.depth + 1
+  FROM chain c
+  JOIN "tallydb-fy23-25".mst_stock_group g ON g.name = c.parent
+  WHERE c.parent IS NOT NULL AND btrim(c.parent) <> ''
+),
+top AS (
+  SELECT DISTINCT ON (leaf) leaf, name AS stock_group_parent, depth
+  FROM chain
+  ORDER BY leaf, depth DESC
+)
+SELECT
+  sg.company,
+  sg.name,
+  sg.parent,
+  t.stock_group_parent,
+  t.depth
+FROM "tallydb-fy23-25".mst_stock_group sg
+JOIN top t ON t.leaf = sg.name;
+
+COMMENT ON VIEW tally_analytics_fy2325.v_stock_group_dim IS
+  'Stock groups with their full parent chain resolved: stock_group_parent = the top-level root ancestor (equals name itself for root-level groups). depth = how many levels below the root this group sits.';
+
+-- ------------------------------------------------------------
 -- Dimension: stock items
 -- ------------------------------------------------------------
 CREATE OR REPLACE VIEW tally_analytics_fy2325.v_item_dim AS
@@ -99,11 +144,13 @@ SELECT
   i.opening_balance,
   i.opening_value,
   i.closing_balance,
-  i.closing_value
-FROM "tallydb-fy23-25".mst_stock_item i;
+  i.closing_value,
+  sgd.stock_group_parent
+FROM "tallydb-fy23-25".mst_stock_item i
+LEFT JOIN tally_analytics_fy2325.v_stock_group_dim sgd ON sgd.name = i.parent;
 
 COMMENT ON VIEW tally_analytics_fy2325.v_item_dim IS
-  'Stock items with their stock group/category/UOM and Tally-computed opening/closing qty & value.';
+  'Stock items with their stock group/category/UOM, Tally-computed opening/closing qty & value, and stock_group_parent (the item''s group''s top-level root, via v_stock_group_dim).';
 
 -- ------------------------------------------------------------
 -- Dimension: vouchers, with resolved nature + sales/purchase channel

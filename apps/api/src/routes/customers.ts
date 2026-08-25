@@ -15,6 +15,7 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
       sql`
         SELECT
           c.customer_id, c.customer_name, c.gstin, c.primary_state_code,
+          c.address, c.payment_terms_days,
           sc.state_name, c.contact_phone, c.contact_email, c.is_active,
           COALESCE(vo.total_pending,    0) AS total_pending,
           COALESCE(vo.max_overdue_days, 0) AS max_overdue_days,
@@ -32,6 +33,7 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
                OR c.customer_id = ${req.filters.customerId}::uuid)
         GROUP BY
           c.customer_id, c.customer_name, c.gstin, c.primary_state_code,
+          c.address, c.payment_terms_days,
           sc.state_name, c.contact_phone, c.contact_email, c.is_active,
           vo.total_pending, vo.max_overdue_days
         ORDER BY c.customer_name

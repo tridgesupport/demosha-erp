@@ -121,6 +121,10 @@ router.put('/variants/:id', async (req: Request, res: Response) => {
 // SKUs (flat catalogue)
 router.get('/skus', async (req: Request, res: Response) => {
   const q = String(req.query.q ?? '').trim();
+  // An empty q means "give me the whole catalogue" (used by the PI line-items
+  // table to populate its item/grade/pkg/code pickers and to compute the next
+  // code locally) — so it isn't capped like a type-ahead search result is.
+  const limit = q === '' ? 5000 : 100;
   try {
     const rows = await sql`
       SELECT sku_id, legacy_code, item, grade, qty, pkg, pro_forma_product, is_active
@@ -128,7 +132,7 @@ router.get('/skus', async (req: Request, res: Response) => {
       WHERE deleted_at IS NULL AND is_active = true
         AND (${q} = '' OR pro_forma_product ILIKE ${'%' + q + '%'} OR legacy_code::text = ${q})
       ORDER BY legacy_code
-      LIMIT 100
+      LIMIT ${limit}
     `;
     res.json(rows);
   } catch (err) {

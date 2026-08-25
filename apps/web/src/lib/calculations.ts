@@ -36,8 +36,11 @@ export function calcNumPackages(qty_kg: number, qty_per_pkg: number | null | und
 
 export function calcOrderTotals(header: OrderHeader, lines: OrderLine[]): OrderTotals {
   const gross_value = lines.reduce((sum, l) => sum + calcLineAmount(l.qty_kg, l.rate_per_mt), 0);
+  const total_qty_kg = lines.reduce((sum, l) => sum + (l.qty_kg || 0), 0);
   const insurance_amount = gross_value * (header.insurance_pct / 100);
-  const freight_amount = gross_value * (header.freight_per_kg / 1000);
+  // Freight is a physical per-kg cost, not a percentage of invoice value —
+  // freight per kg × total quantity shipped, independent of price/rate.
+  const freight_amount = header.freight_per_kg * total_qty_kg;
   const assessable_value = gross_value + insurance_amount + freight_amount;
 
   let igst_amount = 0;

@@ -1,6 +1,6 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { Trash2, Plus } from 'lucide-react';
+import { Trash2, Plus, Sparkles } from 'lucide-react';
 import { calcLineAmount, calcNumPackages, formatINR } from '@/lib/calculations';
 import { fetchSkus, createSku } from '@/lib/api';
 
@@ -43,19 +43,25 @@ export default function PiLineItemsTable({ lines, onChange, lineErrors = {} }: P
     queryFn: () => fetchSkus(''),
   });
 
+  // Row indices with a "Create new SKU" save in flight, so the button can
+  // show a spinner state and can't be double-clicked.
+  const [creatingRows, setCreatingRows] = useState<Set<number>>(new Set());
+
   // Latest lines, for use inside async handlers so a delayed response doesn't clobber
   // edits made elsewhere in the table while the request was in flight.
   const linesRef = useRef(lines);
   useEffect(() => { linesRef.current = lines; }, [lines]);
 
-  // Distinct items from catalogue
-  const items = [...new Set(allSkus.map((s: any) => s.item as string))].sort();
+  // Distinct items from catalogue — used as <datalist> suggestions, not a
+  // closed set: every item/grade/pkg field below is free text, so a value
+  // that isn't in this list yet can still be typed in.
+  const items = [...new Set(allSkus.map((s: any) => s.item as string).filter(Boolean))].sort();
 
-  // Grades available for a given item
+  // Grades seen for a given item (suggestions only)
   const gradesFor = (item: string) =>
     [...new Set(allSkus.filter((s: any) => s.item === item).map((s: any) => (s.grade as string) || '').filter(Boolean))].sort();
 
-  // Pkgs available for item+grade combo
+  // Pkgs seen for an item+grade combo (suggestions only)
   const pkgsFor = (item: string, grade: string) =>
     [...new Set(allSkus.filter((s: any) => s.item === item && (s.grade || '') === grade).map((s: any) => (s.pkg as string) || '').filter(Boolean))].sort();
 
@@ -68,6 +74,8 @@ export default function PiLineItemsTable({ lines, onChange, lineErrors = {} }: P
       (s.pkg || '') === pkg
     );
 
+  const nextCode = () => allSkus.reduce((max: number, s: any) => Math.max(max, Number(s.legacy_code) || 0), 0) + 1;
+
   const applyLine = (idx: number, patch: Partial<LineItem>) => {
     onChange(linesRef.current.map((l, i) => {
       if (i !== idx) return l;
@@ -78,8 +86,10 @@ export default function PiLineItemsTable({ lines, onChange, lineErrors = {} }: P
     }));
   };
 
-  // When item/grade/qty change: recompute description and try to match a SKU (no auto-create,
-  // since these fields fire on every keystroke/intermediate selection).
+  // Whenever item/grade/qty/pkg change: try to match an existing SKU and fill
+  // sku_id/code/description from it; otherwise clear those and recompute the
+  // description locally. Never auto-creates — creation is an explicit action
+  // (see handleCreateSku) so the user sees and confirms it's happening.
   const matchSkuOrClear = (idx: number, patch: Partial<LineItem>) => {
     const line = lines[idx];
     const merged = { ...line, ...patch };
@@ -96,47 +106,8 @@ export default function PiLineItemsTable({ lines, onChange, lineErrors = {} }: P
     applyLine(idx, merged);
   };
 
-  // When the pkg is selected, or qty/pkg is committed (blur): match an existing SKU, or —
-  // once item, grade, qty/pkg and pkg are all filled in and no match exists — auto-generate a
-  // new code as (largest existing legacy_code + 1).
-  const handleCatalogueField = async (idx: number, patch: Partial<LineItem>) => {
-    const line = lines[idx];
-    const merged = { ...line, ...patch };
-    const sku = findSku(merged.item, merged.grade, merged.qty_per_pkg, merged.pkg);
-    if (sku) {
-      merged.sku_id        = sku.sku_id;
-      merged.legacy_code   = String(sku.legacy_code);
-      merged.full_description = sku.pro_forma_product;
-      applyLine(idx, merged);
-      return;
-    }
-
-    merged.sku_id      = '';
-    merged.legacy_code = '';
-    merged.full_description = computeProForma(merged.item, merged.grade, merged.qty_per_pkg, merged.pkg);
-    applyLine(idx, merged);
-
-    if (!merged.item || !merged.grade || !merged.pkg || !merged.qty_per_pkg) return;
-
-    try {
-      const created: any = await createSku({
-        item: merged.item,
-        grade: merged.grade,
-        qty: merged.qty_per_pkg,
-        pkg: merged.pkg,
-      });
-      queryClient.setQueryData<any[]>(['skus-all'], (old = []) => [...old, created]);
-      applyLine(idx, {
-        sku_id:           created.sku_id,
-        legacy_code:      String(created.legacy_code),
-        full_description: created.pro_forma_product,
-      });
-    } catch (err) {
-      console.error('Failed to auto-generate SKU code', err);
-    }
-  };
-
-  // Code lookup (on blur)
+  // Code lookup (on blur) — pick an existing code by typing/selecting it from
+  // the datalist and the rest of the row fills in.
   const handleCodeBlur = (idx: number, code: string) => {
     const num = parseInt(code);
     if (!num) return;
@@ -153,11 +124,52 @@ export default function PiLineItemsTable({ lines, onChange, lineErrors = {} }: P
     });
   };
 
+  // Item/grade/qty/pkg are all filled in but don't match any existing SKU —
+  // offer to create one (rather than silently doing it), auto-numbered to
+  // the next available code.
+  const canCreateSku = (line: LineItem) =>
+    !line.sku_id && !!line.item.trim() && !!line.grade.trim() && !!line.pkg.trim() && !!line.qty_per_pkg;
+
+  const handleCreateSku = async (idx: number) => {
+    const line = lines[idx];
+    if (!canCreateSku(line)) return;
+    setCreatingRows(prev => new Set(prev).add(idx));
+    try {
+      const created: any = await createSku({
+        item: line.item.trim(),
+        grade: line.grade.trim(),
+        qty: line.qty_per_pkg,
+        pkg: line.pkg.trim(),
+      });
+      // Available immediately for this row and for every other item/grade/pkg
+      // picker and code lookup in the table — no refetch needed.
+      queryClient.setQueryData<any[]>(['skus-all'], (old = []) => [...old, created]);
+      applyLine(idx, {
+        sku_id:           created.sku_id,
+        legacy_code:      String(created.legacy_code),
+        full_description: created.pro_forma_product,
+      });
+    } catch (err) {
+      console.error('Failed to create SKU', err);
+    } finally {
+      setCreatingRows(prev => { const s = new Set(prev); s.delete(idx); return s; });
+    }
+  };
+
   const addLine    = () => onChange([...lines, emptyLineItem()]);
   const removeLine = (idx: number) => onChange(lines.filter((_, i) => i !== idx));
 
   return (
     <div>
+      {/* Shared suggestion lists — free-text inputs below reference these by id,
+          so users can pick an existing value or type a brand new one. */}
+      <datalist id="sku-item-list">
+        {items.map((it: string) => <option key={it} value={it} />)}
+      </datalist>
+      <datalist id="sku-code-list">
+        {allSkus.map((s: any) => <option key={s.sku_id} value={s.legacy_code} />)}
+      </datalist>
+
       <div className="overflow-x-auto">
         <table className="text-xs" style={{ minWidth: 1240 }}>
           <thead>
@@ -181,15 +193,17 @@ export default function PiLineItemsTable({ lines, onChange, lineErrors = {} }: P
               const grades = gradesFor(line.item);
               const pkgs   = pkgsFor(line.item, line.grade);
               const hasErr = !!lineErrors[idx];
+              const offerCreate = canCreateSku(line);
+              const isCreating = creatingRows.has(idx);
               return (
                 <tr key={idx} className={`border-b hover:bg-gray-50 align-top ${hasErr ? 'bg-red-50' : ''}`}>
                   {/* # */}
                   <td className="py-2 pr-1 text-gray-400 pt-2.5">{idx + 1}</td>
 
-                  {/* Code */}
+                  {/* Code — pick an existing one from the dropdown, or leave blank for a new item */}
                   <td className="py-2 pr-1">
                     <input
-                      type="number" min="1"
+                      type="text" inputMode="numeric" list="sku-code-list"
                       value={line.legacy_code || ''}
                       onChange={e => applyLine(idx, { legacy_code: e.target.value })}
                       onBlur={e => handleCodeBlur(idx, e.target.value)}
@@ -198,29 +212,30 @@ export default function PiLineItemsTable({ lines, onChange, lineErrors = {} }: P
                     />
                   </td>
 
-                  {/* Item */}
+                  {/* Item — free text; pick a suggestion or type a new item name */}
                   <td className="py-2 pr-1">
-                    <select
+                    <input
+                      type="text" list="sku-item-list"
                       value={line.item}
-                      onChange={e => matchSkuOrClear(idx, { item: e.target.value, grade: '', qty_per_pkg: null, pkg: '' })}
+                      onChange={e => matchSkuOrClear(idx, { item: e.target.value })}
+                      placeholder="Type or select item…"
                       className={`w-full border rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 ${hasErr ? 'border-red-400' : 'border-gray-300'}`}
-                    >
-                      <option value="">— select item —</option>
-                      {items.map((it: string) => <option key={it} value={it}>{it}</option>)}
-                    </select>
+                    />
                   </td>
 
-                  {/* Grade */}
+                  {/* Grade — free text; suggestions scoped to the item typed above */}
                   <td className="py-2 pr-1">
-                    <select
+                    <input
+                      type="text" list={`sku-grade-list-${idx}`}
                       value={line.grade}
-                      onChange={e => matchSkuOrClear(idx, { grade: e.target.value, qty_per_pkg: null, pkg: '' })}
+                      onChange={e => matchSkuOrClear(idx, { grade: e.target.value })}
                       disabled={!line.item}
+                      placeholder="—"
                       className="w-full border border-gray-300 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
-                    >
-                      <option value="">—</option>
-                      {grades.map((g: string) => <option key={g} value={g}>{g}</option>)}
-                    </select>
+                    />
+                    <datalist id={`sku-grade-list-${idx}`}>
+                      {grades.map((g: string) => <option key={g} value={g} />)}
+                    </datalist>
                   </td>
 
                   {/* Qty/pkg — plain number input; auto-set from code lookup, or typed manually */}
@@ -229,26 +244,27 @@ export default function PiLineItemsTable({ lines, onChange, lineErrors = {} }: P
                       type="number" min="0" step="any"
                       value={line.qty_per_pkg ?? ''}
                       onChange={e => matchSkuOrClear(idx, { qty_per_pkg: e.target.value ? Number(e.target.value) : null })}
-                      onBlur={() => handleCatalogueField(idx, {})}
                       placeholder="—"
                       className="w-full border border-gray-300 rounded px-1.5 py-1 text-right focus:outline-none focus:ring-1 focus:ring-blue-500"
                     />
                   </td>
 
-                  {/* Pkg */}
+                  {/* Pkg — free text; suggestions scoped to the item+grade above */}
                   <td className="py-2 pr-1">
-                    <select
+                    <input
+                      type="text" list={`sku-pkg-list-${idx}`}
                       value={line.pkg}
-                      onChange={e => handleCatalogueField(idx, { pkg: e.target.value })}
+                      onChange={e => matchSkuOrClear(idx, { pkg: e.target.value })}
                       disabled={!line.grade}
+                      placeholder="—"
                       className="w-full border border-gray-300 rounded px-1.5 py-1 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:opacity-50"
-                    >
-                      <option value="">—</option>
-                      {pkgs.map((p: string) => <option key={p} value={p}>{p}</option>)}
-                    </select>
+                    />
+                    <datalist id={`sku-pkg-list-${idx}`}>
+                      {pkgs.map((p: string) => <option key={p} value={p} />)}
+                    </datalist>
                   </td>
 
-                  {/* Pro Forma Product (auto-filled, editable) */}
+                  {/* Pro Forma Product (auto-filled, editable) + explicit "create new SKU" offer */}
                   <td className="py-2 pr-1">
                     <input
                       type="text"
@@ -257,6 +273,17 @@ export default function PiLineItemsTable({ lines, onChange, lineErrors = {} }: P
                       placeholder="auto-filled from above"
                       className="w-full border border-gray-300 rounded px-1.5 py-1 bg-blue-50 focus:outline-none focus:ring-1 focus:ring-blue-500 focus:bg-white"
                     />
+                    {offerCreate && (
+                      <button
+                        type="button"
+                        onClick={() => handleCreateSku(idx)}
+                        disabled={isCreating}
+                        className="mt-1 w-full flex items-center justify-center gap-1 px-1.5 py-1 border border-dashed border-amber-400 text-amber-700 bg-amber-50 rounded hover:bg-amber-100 disabled:opacity-50"
+                      >
+                        <Sparkles className="w-3 h-3" />
+                        {isCreating ? 'Saving…' : `New item — save as code #${nextCode()}`}
+                      </button>
+                    )}
                   </td>
 
                   {/* Qty (kg) */}

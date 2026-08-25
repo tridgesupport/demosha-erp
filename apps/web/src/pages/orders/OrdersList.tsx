@@ -1,10 +1,15 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useFiltersContext } from '@/context/FiltersContext';
 import { useOrders } from '@/hooks/useOrders';
+import { fetchOrders } from '@/lib/api';
 import { formatINR } from '@/lib/calculations';
 import StatusBadge from '@/components/StatusBadge';
 import { Plus, Download, ChevronUp, ChevronDown } from 'lucide-react';
+
+// Server page-size cap (see GET /api/orders) — used to page through every
+// matching row when exporting "all", not just what's on screen.
+const EXPORT_PAGE_SIZE = 200;
 
 type SortKey = 'pi_number' | 'order_date' | 'buyer_name' | 'agent_name' | 'total_amount' | 'status' | 'submitted_at';
 
@@ -21,33 +26,51 @@ export default function OrdersList() {
   const total: number = data?.total ?? 0;
   const totalPages = Math.ceil(total / 50);
 
-  const displayed = useMemo(() => {
-    let r = rows;
+  const [exportMenuOpen, setExportMenuOpen] = useState(false);
+  const [exporting, setExporting] = useState<{ done: number; total: number } | null>(null);
+  const exportMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!exportMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (!exportMenuRef.current?.contains(e.target as Node)) setExportMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [exportMenuOpen]);
+
+  // Same client-side search + sort applied to whatever row set we're given —
+  // shared by the on-screen table and both export paths so "current page"
+  // and "all" stay consistent with what's actually visible/searched.
+  const filterAndSort = useCallback((r: any[]) => {
+    let filtered = r;
     if (search) {
       const q = search.toLowerCase();
-      r = r.filter((o) =>
+      filtered = filtered.filter((o) =>
         o.pi_number?.toLowerCase().includes(q) ||
         o.buyer_name?.toLowerCase().includes(q)
       );
     }
-    return [...r].sort((a, b) => {
+    return [...filtered].sort((a, b) => {
       const av = a[sortKey] ?? '';
       const bv = b[sortKey] ?? '';
       const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true });
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [rows, search, sortKey, sortDir]);
+  }, [search, sortKey, sortDir]);
+
+  const displayed = useMemo(() => filterAndSort(rows), [rows, filterAndSort]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     else { setSortKey(key); setSortDir('asc'); }
   };
 
-  const exportCsv = () => {
+  const downloadCsv = (list: any[], filename: string) => {
     const headers = ['PI#', 'FY', 'Date', 'Buyer', 'Consignee', 'Agent', 'Total (INR)', 'Status', 'Updated', 'Lines'];
     const csvRows = [
       headers.join(','),
-      ...displayed.map((o) =>
+      ...list.map((o) =>
         [
           o.pi_number, o.fy_label, o.order_date, `"${o.buyer_name}"`, `"${o.consignee_name}"`,
           `"${o.agent_name}"`, o.total_amount, o.status,
@@ -60,9 +83,36 @@ export default function OrdersList() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'orders.csv';
+    a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const exportCurrentPage = () => {
+    downloadCsv(displayed, 'orders_current_page.csv');
+    setExportMenuOpen(false);
+  };
+
+  // Pages through every row matching the active filters (ignoring the
+  // on-screen page), not just the ≤50 rows currently rendered.
+  const exportAllMatching = async () => {
+    setExportMenuOpen(false);
+    setExporting({ done: 0, total: 0 });
+    try {
+      const first = await fetchOrders(filters, 1, EXPORT_PAGE_SIZE) as { data: any[]; total: number };
+      let all = first.data ?? [];
+      const grandTotal = first.total ?? all.length;
+      setExporting({ done: all.length, total: grandTotal });
+      const totalServerPages = Math.ceil(grandTotal / EXPORT_PAGE_SIZE);
+      for (let p = 2; p <= totalServerPages; p++) {
+        const res = await fetchOrders(filters, p, EXPORT_PAGE_SIZE) as { data: any[] };
+        all = all.concat(res.data ?? []);
+        setExporting({ done: all.length, total: grandTotal });
+      }
+      downloadCsv(filterAndSort(all), 'orders_all.csv');
+    } finally {
+      setExporting(null);
+    }
   };
 
   const SortIcon = ({ col }: { col: SortKey }) =>
@@ -75,9 +125,35 @@ export default function OrdersList() {
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Sales Orders</h1>
         <div className="flex gap-2">
-          <button onClick={exportCsv} className="flex items-center gap-1 px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50">
-            <Download className="w-4 h-4" /> Export CSV
-          </button>
+          <div ref={exportMenuRef} className="relative">
+            <button
+              onClick={() => setExportMenuOpen((o) => !o)}
+              disabled={!!exporting}
+              className="flex items-center gap-1 px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50"
+            >
+              <Download className="w-4 h-4" />
+              {exporting ? `Exporting… ${exporting.done}/${exporting.total || '?'}` : 'Export CSV'}
+              {!exporting && <ChevronDown className="w-3 h-3" />}
+            </button>
+            {exportMenuOpen && (
+              <div className="absolute z-20 mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg overflow-hidden">
+                <button
+                  onClick={exportCurrentPage}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50"
+                >
+                  <span className="font-medium text-gray-800">Current page</span>
+                  <span className="block text-xs text-gray-400">{displayed.length} row{displayed.length !== 1 ? 's' : ''} shown on screen</span>
+                </button>
+                <button
+                  onClick={exportAllMatching}
+                  className="w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-t border-gray-100"
+                >
+                  <span className="font-medium text-gray-800">All matching filters</span>
+                  <span className="block text-xs text-gray-400">{total} row{total !== 1 ? 's' : ''} across every page</span>
+                </button>
+              </div>
+            )}
+          </div>
           <Link to="/orders/new" className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">
             <Plus className="w-4 h-4" /> New Pro Forma
           </Link>

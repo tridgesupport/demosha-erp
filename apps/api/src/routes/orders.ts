@@ -303,7 +303,7 @@ router.put('/:id', async (req: Request, res: Response) => {
 
 router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { status } = req.body;
+  const { status, comment } = req.body;
   const VALID = ['draft', 'sent', 'approved', 'invoiced', 'dispatched', 'cancelled', 'sent_to_factory'];
   if (!VALID.includes(status)) return res.status(400).json({ error: 'Invalid status' });
 
@@ -317,6 +317,16 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
   const isInvoiced = status === 'invoiced';
   const isDispatched = status === 'dispatched';
 
+  // A manager/admin approving goes through as usual. Anyone else approving is
+  // "self-approval" — for when management isn't around to sign off — and must
+  // leave a comment explaining why, so the reason stays visible to everyone
+  // downstream (factory, dispatch, etc.) who opens this PI afterwards.
+  const isManagerOrAdmin = ['admin', 'manager'].includes(req.user?.role?.toLowerCase() ?? '');
+  const isSelfApproval = isApproval && !isManagerOrAdmin;
+  if (isSelfApproval && !String(comment ?? '').trim()) {
+    return res.status(400).json({ error: 'A comment is required to self-approve' });
+  }
+
   try {
     const rows = await sql`
       UPDATE sales_orders SET
@@ -326,6 +336,8 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
         submitted_at  = CASE WHEN ${isSubmission} THEN NOW()        ELSE submitted_at END,
         approved_by   = CASE WHEN ${isApproval}   THEN ${userEmail} ELSE approved_by END,
         approved_at   = CASE WHEN ${isApproval}   THEN NOW()        ELSE approved_at END,
+        is_self_approved  = CASE WHEN ${isApproval}   THEN ${isSelfApproval} ELSE is_self_approved END,
+        approval_comment  = CASE WHEN ${isApproval}   THEN ${String(comment ?? '').trim() || null} ELSE approval_comment END,
         invoiced_at      = CASE WHEN ${isInvoiced}   THEN NOW()        ELSE invoiced_at END,
         dispatched_at    = CASE WHEN ${isDispatched} THEN NOW()        ELSE dispatched_at END,
         status_changed_at = NOW()
@@ -368,6 +380,20 @@ router.post('/:id/upload-approved-pi', requireAuth, requireRole('admin', 'manage
     const prefix = await orderFilePrefix(req.params.id);
     const { url, fileId } = await uploadToImagekit(req.file.buffer, `${prefix}_approved_pi.pdf`, 'approved_proforma');
     await sql`UPDATE sales_orders SET approved_pi_url = ${url}, approved_pi_file_id = ${fileId} WHERE order_id = ${req.params.id}`;
+    res.json({ url, fileId });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }
+});
+
+// Evidence attached to a self-approval (e.g. a screenshot/photo of the manager's
+// WhatsApp or email sign-off) — any authenticated user can attach this, since
+// self-approval is precisely for when the usual admin/manager approver isn't
+// available to use upload-approved-pi themselves.
+router.post('/:id/upload-approval-attachment', requireAuth, upload.single('file') as any, async (req: Request, res: Response) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const prefix = await orderFilePrefix(req.params.id);
+    const { url, fileId } = await uploadToImagekit(req.file.buffer, `${prefix}_approval_attachment`, 'approval_attachments');
+    await sql`UPDATE sales_orders SET approval_attachment_url = ${url}, approval_attachment_file_id = ${fileId} WHERE order_id = ${req.params.id}`;
     res.json({ url, fileId });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }
 });

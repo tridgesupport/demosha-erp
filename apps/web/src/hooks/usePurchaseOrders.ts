@@ -38,8 +38,8 @@ export function useUpdatePurchaseOrder(id: string) {
 export function useUpdatePurchaseOrderStatus(id: string) {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ status, grn_number }: { status: string; grn_number?: string }) =>
-      api.updatePurchaseOrderStatus(id, status, grn_number),
+    mutationFn: ({ status, grn_number, comment }: { status: string; grn_number?: string; comment?: string }) =>
+      api.updatePurchaseOrderStatus(id, status, grn_number, comment),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['purchase-orders'] });
       qc.invalidateQueries({ queryKey: ['purchase-order', id] });

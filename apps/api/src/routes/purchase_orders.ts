@@ -227,13 +227,9 @@ router.put('/:id', requireAuth, async (req: Request, res: Response) => {
 
 router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { status, grn_number } = req.body;
+  const { status, grn_number, comment } = req.body;
   const VALID = ['sent', 'pending_approval', 'approved', 'sent_to_vendor', 'dispatched_by_supplier', 'received', 'cancelled'];
   if (!VALID.includes(status)) return res.status(400).json({ error: 'Invalid status' });
-
-  if (status === 'approved' && !['admin', 'manager'].includes(req.user?.role?.toLowerCase() ?? '')) {
-    return res.status(403).json({ error: 'Only managers or admins can approve purchase orders' });
-  }
 
   const userEmail             = req.user?.email ?? null;
   const isSubmission          = status === 'sent';
@@ -242,6 +238,16 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
   const isDispatchedBySupplier = status === 'dispatched_by_supplier';
   const isReceived            = status === 'received';
   const isCancelled           = status === 'cancelled';
+
+  // A manager/admin approving goes through as usual. Anyone else approving is
+  // "self-approval" — for when management isn't around to sign off — and must
+  // leave a comment explaining why, so the reason stays visible to everyone
+  // downstream (vendor dispatch, GRN, etc.) who opens this PO afterwards.
+  const isManagerOrAdmin = ['admin', 'manager'].includes(req.user?.role?.toLowerCase() ?? '');
+  const isSelfApproval = isApproval && !isManagerOrAdmin;
+  if (isSelfApproval && !String(comment ?? '').trim()) {
+    return res.status(400).json({ error: 'A comment is required to self-approve' });
+  }
 
   try {
     const rows = await sql`
@@ -253,6 +259,8 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
         submitted_at        = CASE WHEN ${isSubmission}    THEN NOW()        ELSE submitted_at END,
         approved_by         = CASE WHEN ${isApproval}      THEN ${userEmail} ELSE approved_by END,
         approved_at         = CASE WHEN ${isApproval}      THEN NOW()        ELSE approved_at END,
+        is_self_approved    = CASE WHEN ${isApproval}      THEN ${isSelfApproval} ELSE is_self_approved END,
+        approval_comment    = CASE WHEN ${isApproval}      THEN ${String(comment ?? '').trim() || null} ELSE approval_comment END,
         sent_to_vendor_at   = CASE WHEN ${isSentToVendor}  THEN NOW()        ELSE sent_to_vendor_at END,
         sent_to_vendor_by   = CASE WHEN ${isSentToVendor}  THEN ${userEmail} ELSE sent_to_vendor_by END,
         dispatched_by_supplier_at = CASE WHEN ${isDispatchedBySupplier} THEN NOW()        ELSE dispatched_by_supplier_at END,
@@ -296,6 +304,20 @@ router.post('/:id/upload-approved-po', requireAuth, requireRole('admin', 'manage
     const prefix = await poFilePrefix(req.params.id);
     const { url, fileId } = await uploadToImagekit(req.file.buffer, `${prefix}_approved_po.pdf`, 'purchase_orders');
     await sql`UPDATE purchase_orders SET approved_po_url = ${url}, approved_po_file_id = ${fileId} WHERE order_id = ${req.params.id}`;
+    res.json({ url, fileId });
+  } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }
+});
+
+// Evidence attached to a self-approval (e.g. a screenshot/photo of the manager's
+// WhatsApp or email sign-off) — any authenticated user can attach this, since
+// self-approval is precisely for when the usual admin/manager approver isn't
+// available to use upload-approved-po themselves.
+router.post('/:id/upload-approval-attachment', requireAuth, upload.single('file') as any, async (req: Request, res: Response) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  try {
+    const prefix = await poFilePrefix(req.params.id);
+    const { url, fileId } = await uploadToImagekit(req.file.buffer, `${prefix}_approval_attachment`, 'approval_attachments');
+    await sql`UPDATE purchase_orders SET approval_attachment_url = ${url}, approval_attachment_file_id = ${fileId} WHERE order_id = ${req.params.id}`;
     res.json({ url, fileId });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }
 });

@@ -68,8 +68,8 @@ export const createOrder = (body: unknown) =>
 export const updateOrder = (id: string, body: unknown) =>
   request(`/api/orders/${id}`, { method: 'PUT', body: JSON.stringify(body) });
 
-export const updateOrderStatus = (id: string, status: string) =>
-  request(`/api/orders/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+export const updateOrderStatus = (id: string, status: string, comment?: string) =>
+  request(`/api/orders/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, comment }) });
 
 export const reviseOrder = (id: string) =>
   request(`/api/orders/${id}/revise`, { method: 'POST' });
@@ -166,6 +166,10 @@ export const uploadSalesBill = (orderId: string, file: File) => {
 export const uploadLr = (orderId: string, file: File) => {
   const fd = new FormData(); fd.append('file', file);
   return fetch(`${BASE_URL}/api/orders/${orderId}/upload-lr`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
+};
+export const uploadOrderApprovalAttachment = (orderId: string, file: File) => {
+  const fd = new FormData(); fd.append('file', file);
+  return fetch(`${BASE_URL}/api/orders/${orderId}/upload-approval-attachment`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
 };
 export const uploadSignature = (userId: string, file: File) => {
   const fd = new FormData(); fd.append('file', file);
@@ -306,8 +310,8 @@ export const createPurchaseOrder = (body: unknown) =>
 export const updatePurchaseOrder = (id: string, body: unknown) =>
   request(`/api/purchase/orders/${id}`, { method: 'PUT', body: JSON.stringify(body) });
 
-export const updatePurchaseOrderStatus = (id: string, status: string, grn_number?: string) =>
-  request(`/api/purchase/orders/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, grn_number }) });
+export const updatePurchaseOrderStatus = (id: string, status: string, grn_number?: string, comment?: string) =>
+  request(`/api/purchase/orders/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, grn_number, comment }) });
 
 export const uploadPoPdf = (orderId: string, file: Blob, filename: string) => {
   const fd = new FormData(); fd.append('file', file, filename);
@@ -319,6 +323,10 @@ export const uploadApprovedPo = (orderId: string, file: File) => {
   return fetch(`${BASE_URL}/api/purchase/orders/${orderId}/upload-approved-po`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
 };
 
+export const uploadPoApprovalAttachment = (orderId: string, file: File) => {
+  const fd = new FormData(); fd.append('file', file);
+  return fetch(`${BASE_URL}/api/purchase/orders/${orderId}/upload-approval-attachment`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
+};
 export const uploadDispatchDoc = (orderId: string, file: File) => {
   const fd = new FormData(); fd.append('file', file);
   return fetch(`${BASE_URL}/api/purchase/orders/${orderId}/upload-dispatch-doc`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());

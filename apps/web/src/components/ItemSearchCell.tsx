@@ -110,6 +110,13 @@ export default function ItemSearchCell({ description, unit, item_id, idx, onChan
   const dropdown = createPortal(
     <div
       ref={dropRef}
+      // Stop mousedown from ever reaching the document-level "click outside
+      // to close" listener below. Without this, clicks on controls that are
+      // meant to change what the dropdown shows (like "Create new item",
+      // which should switch to the New Item form) were racing with that
+      // listener and losing — the whole dropdown closed instead of updating,
+      // so the button appeared to do nothing.
+      onMouseDown={(e) => e.stopPropagation()}
       style={{
         position: 'absolute',
         top: dropPos.top,

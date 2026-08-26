@@ -24,6 +24,8 @@ export default function ItemSearchCell({ description, unit, item_id, idx, onChan
   const [newUnit, setNewUnit]         = useState('KG');
   const [newGroup, setNewGroup]       = useState('');
   const [newCat, setNewCat]           = useState('');
+  const [saving, setSaving]           = useState(false);
+  const [createError, setCreateError] = useState<string | null>(null);
   const [dropPos, setDropPos]         = useState({ top: 0, left: 0, width: 480 });
 
   const inputRef = useRef<HTMLInputElement>(null);
@@ -79,15 +81,26 @@ export default function ItemSearchCell({ description, unit, item_id, idx, onChan
   };
 
   const handleCreate = async () => {
-    if (!newName.trim()) return;
-    const created = await createPurchaseItem({
-      item_name: newName.trim(),
-      default_unit: newUnit,
-      item_group: newGroup || null,
-      category: newCat || null,
-    });
-    select(created);
-    setNewName(''); setNewGroup(''); setNewCat(''); setNewUnit('KG');
+    if (!newName.trim() || saving) return;
+    setSaving(true);
+    setCreateError(null);
+    try {
+      const created = await createPurchaseItem({
+        item_name: newName.trim(),
+        default_unit: newUnit,
+        item_group: newGroup || null,
+        category: newCat || null,
+      });
+      select(created);
+      setNewName(''); setNewGroup(''); setNewCat(''); setNewUnit('KG');
+    } catch (err: any) {
+      // Previously this failed silently on any error (auth, validation, network) —
+      // the panel just sat there with no feedback. Surface it and keep the
+      // entered values so the user doesn't have to retype them.
+      setCreateError(err?.message ?? 'Failed to create item');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const groupNames  = Object.keys(groups).sort();
@@ -112,7 +125,7 @@ export default function ItemSearchCell({ description, unit, item_id, idx, onChan
         <div className="p-4 space-y-3">
           <div className="flex items-center justify-between mb-1">
             <p className="text-sm font-semibold text-gray-800">New Item</p>
-            <button onMouseDown={() => setCreating(false)} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+            <button type="button" onMouseDown={() => { setCreating(false); setCreateError(null); }} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -145,9 +158,18 @@ export default function ItemSearchCell({ description, unit, item_id, idx, onChan
               {UNITS.map(u => <option key={u}>{u}</option>)}
             </select>
           </div>
+          {createError && (
+            <p className="text-xs text-red-600 bg-red-50 border border-red-200 rounded-lg px-2 py-1.5">{createError}</p>
+          )}
           <div className="flex gap-2 pt-1">
-            <button onMouseDown={handleCreate} className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">Save Item</button>
-            <button onMouseDown={() => setCreating(false)} className="px-4 py-1.5 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">Cancel</button>
+            <button type="button" onMouseDown={handleCreate} disabled={saving || !newName.trim()}
+              className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50">
+              {saving ? 'Saving…' : 'Save Item'}
+            </button>
+            <button type="button" onMouseDown={() => { setCreating(false); setCreateError(null); }} disabled={saving}
+              className="px-4 py-1.5 border border-gray-300 text-sm rounded-lg hover:bg-gray-50 disabled:opacity-50">
+              Cancel
+            </button>
           </div>
         </div>
       ) : (
@@ -219,7 +241,7 @@ export default function ItemSearchCell({ description, unit, item_id, idx, onChan
 
           {/* Create new */}
           <div className="border-t border-gray-100 px-3 py-2.5">
-            <button onMouseDown={() => { setCreating(true); setNewName(query); }}
+            <button type="button" onMouseDown={() => { setCreating(true); setCreateError(null); setNewName(query); }}
               className="flex items-center gap-1.5 text-sm text-green-700 hover:text-green-800">
               <Plus className="w-3.5 h-3.5" /> Create new item
             </button>

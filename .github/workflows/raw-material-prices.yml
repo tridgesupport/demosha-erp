@@ -1,0 +1,30 @@
+name: Raw material prices
+
+on:
+  schedule:
+    # 06:00 UTC = 11:30 IST
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies (poppler + tesseract, for coal PDF OCR)
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils tesseract-ocr
+
+      - name: Install Python dependencies
+        working-directory: raw-material-prices
+        run: pip install -r requirements.txt
+
+      - name: Run scrapers
+        working-directory: raw-material-prices
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python run_daily.py

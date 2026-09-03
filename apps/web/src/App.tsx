@@ -61,7 +61,7 @@ function AnalyticsPageLoading() {
   );
 }
 
-const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: string; exact?: boolean }[] }> = {
+export const TAB_CONFIG: Record<string, { label: string; links: { to: string; label: string; exact?: boolean }[] }> = {
   sales: {
     label: 'Sales',
     links: [
@@ -124,6 +124,44 @@ function getActiveTab(pathname: string): string {
   return '';
 }
 
+// Sub-link permissions only gate a tab's landing pages (the exact paths in
+// TAB_CONFIG.links) — not everything nested under them. A detail/action
+// route like /orders/:id or /customers/:id doesn't exactly match any link,
+// so it deliberately falls through ungated: someone who can only reach
+// Orders can still open a customer record by drilling in from an order,
+// they just never get a "Customers" nav link or /customers list access.
+function getActiveLink(pathname: string, tab: string) {
+  return TAB_CONFIG[tab]?.links.find(l => pathname === l.to);
+}
+
+// Tabs a role can see. Falls back to ROLE_DEFAULTS when the server hasn't
+// returned any allowed_tabs yet (e.g. a role with no role_tab_permissions
+// rows configured) — kept as its own function so TabGuard and the nav can
+// share the exact same fallback logic as getAllowedLinks below.
+const ROLE_DEFAULTS: Record<string, string[]> = {
+  admin:          ['sales', 'purchase', 'management', 'production', 'analytics'],
+  manager:        ['sales', 'purchase', 'management', 'production', 'analytics'],
+  salesperson:    ['sales'],
+  factory:        ['purchase', 'management', 'production'],
+  plant_incharge: ['production'],
+};
+
+function getAllowedTabs(user: { allowed_tabs?: string[]; role?: string } | null): string[] {
+  return user?.allowed_tabs?.length ? user.allowed_tabs : (user?.role ? ROLE_DEFAULTS[user.role] ?? [] : []);
+}
+
+// Sub-links a role can reach within each of its allowed tabs. When falling
+// back to ROLE_DEFAULTS (no allowed_tabs from the server), also fall back
+// to granting every link under those tabs — otherwise a role the server
+// hasn't configured yet would read as having zero sub-links and get
+// redirected in circles instead of seeing its default full access.
+function getAllowedLinks(user: { allowed_tabs?: string[]; allowed_links?: Record<string, string[]>; role?: string } | null): Record<string, string[]> {
+  if (user?.allowed_tabs?.length) return user.allowed_links ?? {};
+  const result: Record<string, string[]> = {};
+  for (const tab of getAllowedTabs(user)) result[tab] = (TAB_CONFIG[tab]?.links ?? []).map(l => l.to);
+  return result;
+}
+
 function RequireAuth({ children }: { children: React.ReactNode }) {
   const { user, isLoading } = useAuth();
   const location = useLocation();
@@ -142,14 +180,33 @@ function TabGuard({ children }: { children: React.ReactNode }) {
   if (!user) return null;
 
   const activeTab = getActiveTab(location.pathname);
-  const allowed = user.allowed_tabs ?? [];
+  const allowedTabs = getAllowedTabs(user);
 
   // Settings (/settings) is always allowed — it's not in TAB_CONFIG so activeTab = ''
-  if (activeTab && !allowed.includes(activeTab)) {
-    const firstAllowed = Object.keys(TAB_CONFIG).find(t => allowed.includes(t));
+  if (activeTab && !allowedTabs.includes(activeTab)) {
+    const firstAllowed = Object.keys(TAB_CONFIG).find(t => allowedTabs.includes(t));
     const defaultTo = firstAllowed ? TAB_CONFIG[firstAllowed].links[0].to : '/';
     return <Navigate to={defaultTo} replace />;
   }
+
+  // One level deeper: only checked when the current path is exactly a
+  // tab's landing page (see getActiveLink) — drill-down/detail routes pass
+  // through untouched.
+  if (activeTab) {
+    const activeLink = getActiveLink(location.pathname, activeTab);
+    const allowedLinks = getAllowedLinks(user)[activeTab] ?? [];
+    if (activeLink && !allowedLinks.includes(activeLink.to)) {
+      const firstAllowedLink = TAB_CONFIG[activeTab].links.find(l => allowedLinks.includes(l.to));
+      if (firstAllowedLink) return <Navigate to={firstAllowedLink.to} replace />;
+      // No links at all allowed under this tab (shouldn't normally happen —
+      // granting a tab grants its links by default) — treat like the tab
+      // itself isn't allowed rather than looping on a link that's always
+      // denied.
+      const nextTab = Object.keys(TAB_CONFIG).find(t => t !== activeTab && allowedTabs.includes(t));
+      return <Navigate to={nextTab ? TAB_CONFIG[nextTab].links[0].to : '/settings'} replace />;
+    }
+  }
+
   return <>{children}</>;
 }
 
@@ -202,17 +259,14 @@ export default function App() {
     location.pathname === '/dispatch/schedules/new' ||
     location.pathname.startsWith('/dispatch/schedules/');
 
-  const ROLE_DEFAULTS: Record<string, string[]> = {
-    admin:          ['sales', 'purchase', 'management', 'production', 'analytics'],
-    manager:        ['sales', 'purchase', 'management', 'production', 'analytics'],
-    salesperson:    ['sales'],
-    factory:        ['purchase', 'management', 'production'],
-    plant_incharge: ['production'],
-  };
-  const allowed = (user?.allowed_tabs?.length ? user.allowed_tabs : (user?.role ? ROLE_DEFAULTS[user.role] ?? [] : []));
+  const allowed = getAllowedTabs(user);
   const activeTab = getActiveTab(location.pathname);
-  const subLinks = (activeTab && allowed.includes(activeTab)) ? TAB_CONFIG[activeTab]?.links ?? [] : [];
+  const allowedLinksForTab = getAllowedLinks(user)[activeTab] ?? [];
+  const subLinks = (activeTab && allowed.includes(activeTab))
+    ? (TAB_CONFIG[activeTab]?.links ?? []).filter(l => allowedLinksForTab.includes(l.to))
+    : [];
   const isSettingsActive = location.pathname.startsWith('/settings');
+  const allAllowedLinks = getAllowedLinks(user);
 
   return (
     <RequireAuth>
@@ -228,7 +282,7 @@ export default function App() {
                   .map(([tab, config]) => (
                     <NavLink
                       key={tab}
-                      to={config.links[0].to}
+                      to={config.links.find(l => allAllowedLinks[tab]?.includes(l.to))?.to ?? config.links[0].to}
                       className={() =>
                         `px-4 py-2 text-sm font-semibold rounded-t transition-colors ${
                           activeTab === tab

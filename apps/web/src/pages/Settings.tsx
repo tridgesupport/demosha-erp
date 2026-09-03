@@ -2,7 +2,8 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchStates, fetchFinancialYears, setCurrentFY, createFY, fetchPackagingTypes, createPackagingType, updatePackagingType, deletePackagingType, fetchAgents, createAgent, updateAgent, uploadSignature, generateResetLink, setMustChangePassword, fetchRoles, createRole, deleteRole, updateProfile } from '@/lib/api';
 import { useAuth } from '@/context/AuthContext';
-import { Edit2, Trash2, Plus, Save, X, Upload, Copy, Check, RefreshCw } from 'lucide-react';
+import { TAB_CONFIG } from '@/App';
+import { Edit2, Trash2, Plus, Save, X, Upload, Copy, Check, RefreshCw, ChevronDown, ChevronRight } from 'lucide-react';
 
 const BASE = '';
 function authHeader(): Record<string, string> { const t = localStorage.getItem('token'); return t ? { Authorization: `Bearer ${t}` } : {}; }
@@ -353,7 +354,10 @@ function PermissionsTab() {
       body: JSON.stringify({ role, tab, allowed }),
     });
     if (!res.ok) { const e = await res.json(); setError(e.error ?? 'Failed to update'); }
-    await refetch();
+    // Granting/revoking a tab cascades to its links on the server (grant ->
+    // full link access; revoke -> clears them), so the fine-tune panel
+    // below needs a fresh copy too.
+    await Promise.all([refetch(), qc.invalidateQueries({ queryKey: ['link-permissions'] })]);
     setSaving(null);
   };
 
@@ -437,6 +441,101 @@ function PermissionsTab() {
           <Plus className="w-4 h-4" /> Add Role
         </button>
       )}
+
+      <LinkPermissionsPanel roles={roles} tabPerms={perms ?? {}} />
+    </div>
+  );
+}
+
+// Fine-tune panel: narrows a role's access from "the whole tab" down to
+// individual sub-nav links (e.g. a factory-sales role that should only see
+// Orders under Sales, not Dashboard/Customers/Sundry Debtors). Only shown
+// for tabs the role already has via the matrix above — a tab it doesn't
+// have is fully hidden regardless of its link rows.
+function LinkPermissionsPanel({ roles, tabPerms }: { roles: string[]; tabPerms: Record<string, Record<string, boolean>> }) {
+  type LinkPermMap = Record<string, Record<string, Record<string, boolean>>>;
+
+  const { data: linkPerms, refetch } = useQuery<LinkPermMap>({
+    queryKey: ['link-permissions'],
+    queryFn: () => fetch(`${BASE}/api/auth/link-permissions`, { headers: authHeader() }).then(r => r.json()),
+  });
+
+  const [role, setRole] = useState('');
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [saving, setSaving] = useState<string | null>(null);
+
+  const selectedRole = role || roles[0] || '';
+  const grantedTabs = Object.keys(TAB_CONFIG).filter(t => tabPerms[selectedRole]?.[t]);
+
+  const toggleLink = async (tab: string, link_path: string, allowed: boolean) => {
+    const key = `${selectedRole}:${tab}:${link_path}`;
+    setSaving(key);
+    await fetch(`${BASE}/api/auth/link-permissions`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeader() },
+      body: JSON.stringify({ role: selectedRole, tab, link_path, allowed }),
+    });
+    await refetch();
+    setSaving(null);
+  };
+
+  if (!roles.length) return null;
+
+  return (
+    <div className="pt-2 space-y-3 border-t border-gray-100">
+      <div>
+        <h3 className="text-sm font-semibold text-gray-800">Fine-tune sub-tab access</h3>
+        <p className="text-xs text-gray-500 mt-0.5">
+          Narrow a role down to specific links within a tab it already has — e.g. Sales access limited to just Orders.
+        </p>
+      </div>
+
+      <select value={selectedRole} onChange={e => setRole(e.target.value)}
+        className="border border-gray-300 rounded px-3 py-1.5 text-sm capitalize">
+        {roles.map(r => <option key={r} value={r} className="capitalize">{r}</option>)}
+      </select>
+
+      {grantedTabs.length === 0 && (
+        <p className="text-xs text-gray-400">This role has no tabs granted above yet.</p>
+      )}
+
+      <div className="max-w-xl divide-y divide-gray-100 border border-gray-200 rounded-lg bg-white overflow-hidden">
+        {grantedTabs.map(tab => {
+          const isOpen = expanded[tab] ?? false;
+          const links = TAB_CONFIG[tab].links;
+          const allowedCount = links.filter(l => linkPerms?.[selectedRole]?.[tab]?.[l.to]).length;
+          return (
+            <div key={tab}>
+              <button onClick={() => setExpanded(e => ({ ...e, [tab]: !isOpen }))}
+                className="w-full flex items-center justify-between px-4 py-2 text-sm hover:bg-gray-50">
+                <span className="flex items-center gap-1.5 font-medium capitalize">
+                  {isOpen ? <ChevronDown className="w-3.5 h-3.5 text-gray-400" /> : <ChevronRight className="w-3.5 h-3.5 text-gray-400" />}
+                  {TAB_CONFIG[tab].label}
+                </span>
+                <span className="text-xs text-gray-400">
+                  {allowedCount === links.length ? 'Full access' : `${allowedCount} of ${links.length} links`}
+                </span>
+              </button>
+              {isOpen && (
+                <div className="px-4 pb-2 pl-9 space-y-1">
+                  {links.map(link => {
+                    const checked = linkPerms?.[selectedRole]?.[tab]?.[link.to] ?? false;
+                    const key = `${selectedRole}:${tab}:${link.to}`;
+                    return (
+                      <label key={link.to} className="flex items-center gap-2 text-sm text-gray-600 py-0.5 cursor-pointer">
+                        <input type="checkbox" checked={checked} disabled={saving === key}
+                          onChange={e => toggleLink(tab, link.to, e.target.checked)}
+                          className="w-4 h-4 accent-blue-600 cursor-pointer disabled:opacity-50" />
+                        {link.label}
+                      </label>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

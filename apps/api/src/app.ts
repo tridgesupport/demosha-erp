@@ -1,6 +1,7 @@
 import express from 'express';
 import cors from 'cors';
 import sql from './db/client';
+import { TAB_LINKS } from './lib/tab-links';
 
 import authRouter from './routes/auth';
 import dashboardRouter from './routes/dashboard';
@@ -41,6 +42,19 @@ const bootstrapped = (async () => {
       role TEXT NOT NULL,
       tab  TEXT NOT NULL,
       PRIMARY KEY (role, tab)
+    )
+  `;
+  // One level deeper than role_tab_permissions: which individual sub-nav
+  // links within an allowed tab a role can reach (e.g. sales -> only
+  // /orders, not /customers or /sales/debtors). A role with no rows for a
+  // tab it's otherwise allowed sees that tab's whole sub-nav — see the
+  // one-time backfill below, which is what keeps that true on day one.
+  await sql`
+    CREATE TABLE IF NOT EXISTS role_link_permissions (
+      role      TEXT NOT NULL,
+      tab       TEXT NOT NULL,
+      link_path TEXT NOT NULL,
+      PRIMARY KEY (role, tab, link_path)
     )
   `;
 
@@ -85,6 +99,27 @@ const bootstrapped = (async () => {
       ('manager', 'analytics')
     ON CONFLICT DO NOTHING
   `;
+
+  // One-time backfill: give every role full link-level access under every
+  // tab it already has at the tab level. Guarded by "table is empty" rather
+  // than run unconditionally — this only runs the moment
+  // role_link_permissions is first created. Re-running it on every startup
+  // would re-grant links an admin had deliberately narrowed (e.g. a
+  // factory-sales role trimmed down to just /orders) right back to full
+  // access on the next deploy.
+  const existingLinkPerms = await sql`SELECT COUNT(*)::int AS c FROM role_link_permissions`;
+  if (existingLinkPerms[0].c === 0) {
+    const tabRows = await sql`SELECT role, tab FROM role_tab_permissions`;
+    for (const row of tabRows as any[]) {
+      for (const link_path of TAB_LINKS[row.tab] ?? []) {
+        await sql`
+          INSERT INTO role_link_permissions (role, tab, link_path)
+          VALUES (${row.role}, ${row.tab}, ${link_path})
+          ON CONFLICT DO NOTHING
+        `;
+      }
+    }
+  }
 
   await sql`ALTER TABLE sales_order_lines ADD COLUMN IF NOT EXISTS full_description TEXT`;
   await sql`ALTER TABLE sales_order_lines ALTER COLUMN variant_id DROP NOT NULL`;

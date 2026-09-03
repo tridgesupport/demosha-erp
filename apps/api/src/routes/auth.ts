@@ -6,6 +6,7 @@ import { randomBytes } from 'crypto';
 import sql from '../db/client';
 import { requireAuth, requireRole } from '../middleware/auth';
 import { uploadToImagekit } from '../lib/imagekit';
+import { TAB_LINKS } from '../lib/tab-links';
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 2 * 1024 * 1024 } });
@@ -22,6 +23,14 @@ function frontendUrl() {
   return (process.env.FRONTEND_URL ?? 'http://localhost:5173').trim();
 }
 
+// Groups flat {tab, link_path} rows into { [tab]: link_path[] } for the
+// allowed_links shape the frontend's TabGuard/nav rendering consumes.
+function groupLinksByTab(rows: { tab: string; link_path: string }[]): Record<string, string[]> {
+  const result: Record<string, string[]> = {};
+  for (const r of rows) (result[r.tab] ??= []).push(r.link_path);
+  return result;
+}
+
 // POST /api/auth/login
 router.post('/login', async (req: Request, res: Response) => {
   const { email, password } = req.body;
@@ -34,6 +43,8 @@ router.post('/login', async (req: Request, res: Response) => {
     if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
     const tabRows = await sql`SELECT tab FROM role_tab_permissions WHERE role = ${user.role} ORDER BY tab`;
     const allowed_tabs = tabRows.map((r: any) => r.tab);
+    const linkRows = await sql`SELECT tab, link_path FROM role_link_permissions WHERE role = ${user.role}`;
+    const allowed_links = groupLinksByTab(linkRows as any[]);
     res.json({
       token: signToken(user),
       user: {
@@ -43,6 +54,7 @@ router.post('/login', async (req: Request, res: Response) => {
         role: user.role,
         signature_url: user.signature_url,
         allowed_tabs,
+        allowed_links,
         must_change_password: user.must_change_password ?? false,
       },
     });
@@ -67,7 +79,8 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
       GROUP BY u.user_id, u.email, u.name, u.role, u.signature_url, u.must_change_password
     `;
     if (rows.length === 0) return res.status(404).json({ error: 'User not found' });
-    res.json(rows[0]);
+    const linkRows = await sql`SELECT tab, link_path FROM role_link_permissions WHERE role = ${rows[0].role}`;
+    res.json({ ...rows[0], allowed_links: groupLinksByTab(linkRows as any[]) });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch user' });
   }
@@ -314,6 +327,7 @@ router.delete('/roles/:role', requireAuth, requireRole('admin'), async (req: Req
     const users = await sql`SELECT COUNT(*)::int AS c FROM users WHERE role = ${role} AND deleted_at IS NULL`;
     if (users[0].c > 0) return res.status(400).json({ error: 'Role has assigned users — reassign them first' });
     await sql`DELETE FROM role_tab_permissions WHERE role = ${role}`;
+    await sql`DELETE FROM role_link_permissions WHERE role = ${role}`;
     await sql`DELETE FROM roles WHERE role_name = ${role}`;
     res.json({ success: true });
   } catch (err) {
@@ -351,12 +365,74 @@ router.patch('/tab-permissions', requireAuth, requireRole('admin'), async (req: 
   try {
     if (allowed) {
       await sql`INSERT INTO role_tab_permissions (role, tab) VALUES (${role}, ${tab}) ON CONFLICT DO NOTHING`;
+      // Granting a tab grants every sub-link under it by default — matches
+      // the pre-link-permissions behavior of "the whole tab." An admin can
+      // narrow it afterward from the link-permissions matrix.
+      for (const link_path of TAB_LINKS[tab] ?? []) {
+        await sql`
+          INSERT INTO role_link_permissions (role, tab, link_path)
+          VALUES (${role}, ${tab}, ${link_path})
+          ON CONFLICT DO NOTHING
+        `;
+      }
     } else {
       await sql`DELETE FROM role_tab_permissions WHERE role = ${role} AND tab = ${tab}`;
+      await sql`DELETE FROM role_link_permissions WHERE role = ${role} AND tab = ${tab}`;
     }
     res.json({ success: true });
   } catch (err) {
     res.status(500).json({ error: 'Failed to update tab permission' });
+  }
+});
+
+// GET /api/auth/link-permissions  (admin only)
+// Returns { [role]: { [tab]: { [link_path]: boolean } } } for every role x
+// every link under every tab in TAB_LINKS — mirrors GET /tab-permissions.
+router.get('/link-permissions', requireAuth, requireRole('admin'), async (_req: Request, res: Response) => {
+  try {
+    const [roleRows, permRows] = await Promise.all([
+      sql`SELECT role_name FROM roles ORDER BY role_name`,
+      sql`SELECT role, tab, link_path FROM role_link_permissions`,
+    ]);
+    const result: Record<string, Record<string, Record<string, boolean>>> = {};
+    for (const r of roleRows as any[]) {
+      result[r.role_name] = {};
+      for (const tab of Object.keys(TAB_LINKS)) {
+        result[r.role_name][tab] = {};
+        for (const link_path of TAB_LINKS[tab]) result[r.role_name][tab][link_path] = false;
+      }
+    }
+    for (const row of permRows as any[]) {
+      if (result[row.role]?.[row.tab] && link_path_in(row.tab, row.link_path)) {
+        result[row.role][row.tab][row.link_path] = true;
+      }
+    }
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch link permissions' });
+  }
+});
+
+function link_path_in(tab: string, link_path: string) {
+  return (TAB_LINKS[tab] ?? []).includes(link_path);
+}
+
+// PATCH /api/auth/link-permissions  (admin only)
+router.patch('/link-permissions', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
+  const { role, tab, link_path, allowed } = req.body;
+  if (!TAB_LINKS[tab]) return res.status(400).json({ error: 'Invalid tab' });
+  if (!TAB_LINKS[tab].includes(link_path)) return res.status(400).json({ error: 'Invalid link' });
+  const roleRows = await sql`SELECT role_name FROM roles WHERE role_name = ${role}`;
+  if (!roleRows.length) return res.status(400).json({ error: 'Invalid role' });
+  try {
+    if (allowed) {
+      await sql`INSERT INTO role_link_permissions (role, tab, link_path) VALUES (${role}, ${tab}, ${link_path}) ON CONFLICT DO NOTHING`;
+    } else {
+      await sql`DELETE FROM role_link_permissions WHERE role = ${role} AND tab = ${tab} AND link_path = ${link_path}`;
+    }
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update link permission' });
   }
 });
 

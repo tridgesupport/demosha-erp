@@ -4,6 +4,7 @@ import { filtersMiddleware } from '../middleware/filters';
 import { requireAuth, requireRole } from '../middleware/auth';
 import sql from '../db/client';
 import { uploadToImagekit } from '../lib/imagekit';
+import { calcOrderTotals, calcLineAmount } from '../lib/orderTotals';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 
@@ -21,7 +22,7 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
     const [rows, countRows] = await Promise.all([
       sql`
         SELECT
-          o.order_id, o.pi_number, o.fy_key, o.seq_number, o.order_date, o.status,
+          o.order_id, o.pi_number, o.part_suffix, o.fy_key, o.seq_number, o.order_date, o.status,
           o.buyer_id,    b.customer_name AS buyer_name,
           o.consignee_id, c.customer_name AS consignee_name,
           o.agent_id,    a.agent_name,
@@ -220,7 +221,19 @@ router.get('/:id', async (req: Request, res: Response) => {
     ]);
 
     if (orderRows.length === 0) return res.status(404).json({ error: 'Order not found' });
-    res.json({ ...orderRows[0], lines: lineRows });
+
+    // Other parts of the same PI (created by a partial invoice/dispatch
+    // split — same pi_number, different part_suffix). Queried separately
+    // rather than joined inline, since an order can have any number of
+    // sibling parts and a join would duplicate the main order row.
+    const parts = await sql`
+      SELECT order_id, part_suffix, status, total_amount
+      FROM sales_orders
+      WHERE pi_number = ${orderRows[0].pi_number} AND order_id != ${id} AND deleted_at IS NULL
+      ORDER BY part_suffix
+    `;
+
+    res.json({ ...orderRows[0], lines: lineRows, parts });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to fetch order' });
@@ -352,16 +365,240 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
   }
 });
 
+// Partial invoice/dispatch. Factory picks how much of each line is being
+// actioned right now — if that's everything, this is just a normal whole-
+// order transition (same effect as PATCH /:id/status). If it's less than
+// the full line quantity, the PI SPLITS: this row shrinks to the actioned
+// quantity and becomes (or stays) "Part <suffix>", and a new sibling row
+// is created for the remainder, sharing the same pi_number/fy_key/
+// seq_number but the next unused part_suffix — still at whatever status
+// this order was in before the action (i.e. not yet invoiced/dispatched).
+// The split never changes price/terms — only quantity — so line rates are
+// always copied from the original line, never taken from the request.
+router.post('/:id/split', requireAuth, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { action, lines: actionedInput } = req.body as {
+    action: 'invoiced' | 'dispatched';
+    lines: Array<{ line_id: string; qty_kg: number; num_packages: number }>;
+  };
+
+  if (!['invoiced', 'dispatched'].includes(action)) {
+    return res.status(400).json({ error: 'action must be "invoiced" or "dispatched"' });
+  }
+  if (req.user?.role?.toLowerCase() !== 'factory') {
+    return res.status(403).json({ error: 'Only factory users can mark orders as invoiced or dispatched' });
+  }
+  if (!Array.isArray(actionedInput) || actionedInput.length === 0) {
+    return res.status(400).json({ error: 'lines is required' });
+  }
+
+  const EPS = 0.001;
+
+  try {
+    const result = await sql.begin(async (sql) => {
+      const orderRows = await sql`
+        SELECT * FROM sales_orders WHERE order_id = ${id} AND deleted_at IS NULL FOR UPDATE
+      `;
+      if (orderRows.length === 0) throw Object.assign(new Error('Order not found'), { status: 404 });
+      const order = orderRows[0] as any;
+
+      const originalLines = await sql`
+        SELECT * FROM sales_order_lines WHERE order_id = ${id} ORDER BY line_number FOR UPDATE
+      `;
+      if (originalLines.length === 0) throw Object.assign(new Error('Order has no lines'), { status: 400 });
+
+      const actionedByLineId = new Map(actionedInput.map((l) => [l.line_id, l]));
+
+      let hasRemainder = false;
+      const actionedLines: any[] = [];
+      const remainderLines: any[] = [];
+
+      for (const orig of originalLines as any[]) {
+        const actioned = actionedByLineId.get(orig.line_id);
+        if (!actioned) {
+          throw Object.assign(new Error(`Missing quantity for line ${orig.line_number}`), { status: 400 });
+        }
+        const origQty = Number(orig.qty_kg);
+        const origPkgs = Number(orig.num_packages);
+        const actionedQty = Number(actioned.qty_kg);
+        const actionedPkgs = Number(actioned.num_packages);
+
+        if (!(actionedQty > 0) || actionedQty > origQty + EPS) {
+          throw Object.assign(new Error(`Invalid quantity for line ${orig.line_number}`), { status: 400 });
+        }
+        if (actionedPkgs < 0 || actionedPkgs > origPkgs) {
+          throw Object.assign(new Error(`Invalid package count for line ${orig.line_number}`), { status: 400 });
+        }
+
+        actionedLines.push({
+          line_id: orig.line_id,
+          line_number: orig.line_number,
+          sku_id: orig.sku_id,
+          variant_id: orig.variant_id,
+          full_description: orig.full_description,
+          rate_per_mt: Number(orig.rate_per_mt),
+          qty_kg: actionedQty,
+          num_packages: actionedPkgs,
+          line_amount: calcLineAmount(actionedQty, Number(orig.rate_per_mt)),
+        });
+
+        const remainderQty = origQty - actionedQty;
+        const remainderPkgs = origPkgs - actionedPkgs;
+        if (remainderQty > EPS) {
+          hasRemainder = true;
+          remainderLines.push({
+            sku_id: orig.sku_id,
+            variant_id: orig.variant_id,
+            full_description: orig.full_description,
+            rate_per_mt: Number(orig.rate_per_mt),
+            qty_kg: remainderQty,
+            num_packages: Math.max(0, remainderPkgs),
+            line_amount: calcLineAmount(remainderQty, Number(orig.rate_per_mt)),
+          });
+        }
+      }
+
+      const header = {
+        freight_per_kg: Number(order.freight_per_kg),
+        insurance_pct: Number(order.insurance_pct),
+        gst_type: order.gst_type,
+        igst_rate: Number(order.igst_rate),
+        cgst_rate: Number(order.cgst_rate),
+        tcs_rate: Number(order.tcs_rate),
+      };
+
+      const isInvoiced = action === 'invoiced';
+      const isDispatched = action === 'dispatched';
+
+      if (!hasRemainder) {
+        // Every line is being actioned in full — no split, just the normal
+        // whole-order transition (mirrors PATCH /:id/status).
+        const totals = calcOrderTotals(header, actionedLines);
+        const updated = await sql`
+          UPDATE sales_orders SET
+            status = ${action},
+            invoiced_at   = CASE WHEN ${isInvoiced}   THEN NOW() ELSE invoiced_at   END,
+            dispatched_at = CASE WHEN ${isDispatched} THEN NOW() ELSE dispatched_at END,
+            status_changed_at = NOW(),
+            updated_at = NOW()
+          WHERE order_id = ${id}
+          RETURNING *
+        `;
+        return { order: updated[0], splitOff: null };
+      }
+
+      // Assign this row a part_suffix (first split -> 'A') and find the next
+      // unused letter for the sibling, locking every existing part of this
+      // PI so two concurrent splits can't allocate the same suffix.
+      const family = await sql`
+        SELECT order_id, part_suffix FROM sales_orders
+        WHERE pi_number = ${order.pi_number} AND deleted_at IS NULL
+        FOR UPDATE
+      `;
+      const usedLetters = new Set((family as any[]).map((r) => r.part_suffix).filter(Boolean));
+      let currentSuffix = (family as any[]).find((r) => r.order_id === order.order_id)?.part_suffix;
+      if (!currentSuffix) {
+        currentSuffix = 'A';
+        usedLetters.add('A');
+      }
+      let nextSuffix: string | null = null;
+      for (let code = 66; code <= 90; code++) {
+        const letter = String.fromCharCode(code);
+        if (!usedLetters.has(letter)) { nextSuffix = letter; break; }
+      }
+      if (!nextSuffix) throw Object.assign(new Error('This PI has too many parts (A–Z exhausted)'), { status: 400 });
+
+      const currentTotals = calcOrderTotals(header, actionedLines);
+      const updatedRows = await sql`
+        UPDATE sales_orders SET
+          part_suffix = ${currentSuffix},
+          status = ${action},
+          invoiced_at   = CASE WHEN ${isInvoiced}   THEN NOW() ELSE invoiced_at   END,
+          dispatched_at = CASE WHEN ${isDispatched} THEN NOW() ELSE dispatched_at END,
+          status_changed_at = NOW(),
+          updated_at = NOW(),
+          gross_value = ${currentTotals.gross_value},
+          insurance_amount = ${currentTotals.insurance_amount},
+          freight_amount = ${currentTotals.freight_amount},
+          assessable_value = ${currentTotals.assessable_value},
+          igst_amount = ${currentTotals.igst_amount},
+          cgst_amount = ${currentTotals.cgst_amount},
+          sgst_amount = ${currentTotals.sgst_amount},
+          tcs_amount = ${currentTotals.tcs_amount},
+          total_amount = ${currentTotals.total_amount}
+        WHERE order_id = ${id}
+        RETURNING *
+      `;
+      const updated = updatedRows[0];
+
+      for (const l of actionedLines) {
+        await sql`
+          UPDATE sales_order_lines SET
+            qty_kg = ${l.qty_kg}, num_packages = ${l.num_packages}, line_amount = ${l.line_amount}
+          WHERE line_id = ${l.line_id}
+        `;
+      }
+
+      const remainderTotals = calcOrderTotals(header, remainderLines);
+      const siblingRows = await sql`
+        INSERT INTO sales_orders (
+          pi_number, fy_key, seq_number, part_suffix, order_date, buyer_order_date, buyer_po_number, po_copy_url,
+          buyer_id, buyer_address, buyer_gstin, buyer_state_code,
+          consignee_id, consignee_name, consignee_address, consignee_gstin, consignee_state_code,
+          agent_id, payment_terms_days, freight_desc, freight_per_kg, insurance_pct,
+          gst_type, igst_rate, cgst_rate, tcs_rate,
+          gross_value, insurance_amount, freight_amount, assessable_value,
+          igst_amount, cgst_amount, sgst_amount, tcs_amount, total_amount,
+          schedule_notes, status, revision_number, is_cancelled,
+          submitted_by, submitted_at, approved_by, approved_at, is_self_approved, approval_comment
+        ) VALUES (
+          ${order.pi_number}, ${order.fy_key}, ${order.seq_number}, ${nextSuffix},
+          ${order.order_date}, ${order.buyer_order_date}, ${order.buyer_po_number}, ${order.po_copy_url},
+          ${order.buyer_id}, ${order.buyer_address}, ${order.buyer_gstin}, ${order.buyer_state_code},
+          ${order.consignee_id}, ${order.consignee_name}, ${order.consignee_address}, ${order.consignee_gstin}, ${order.consignee_state_code},
+          ${order.agent_id}, ${order.payment_terms_days}, ${order.freight_desc}, ${order.freight_per_kg}, ${order.insurance_pct},
+          ${order.gst_type}, ${order.igst_rate}, ${order.cgst_rate}, ${order.tcs_rate},
+          ${remainderTotals.gross_value}, ${remainderTotals.insurance_amount}, ${remainderTotals.freight_amount}, ${remainderTotals.assessable_value},
+          ${remainderTotals.igst_amount}, ${remainderTotals.cgst_amount}, ${remainderTotals.sgst_amount}, ${remainderTotals.tcs_amount}, ${remainderTotals.total_amount},
+          ${order.schedule_notes}, ${order.status}, ${order.revision_number}, false,
+          ${order.submitted_by}, ${order.submitted_at}, ${order.approved_by}, ${order.approved_at}, ${order.is_self_approved}, ${order.approval_comment}
+        )
+        RETURNING *
+      `;
+      const sibling = siblingRows[0];
+
+      for (let i = 0; i < remainderLines.length; i++) {
+        const l = remainderLines[i];
+        await sql`
+          INSERT INTO sales_order_lines
+            (order_id, line_number, sku_id, variant_id, full_description, num_packages, qty_kg, rate_per_mt, line_amount)
+          VALUES
+            (${sibling.order_id}, ${i + 1}, ${l.sku_id}, ${l.variant_id}, ${l.full_description},
+             ${l.num_packages}, ${l.qty_kg}, ${l.rate_per_mt}, ${l.line_amount})
+        `;
+      }
+
+      return { order: updated, splitOff: sibling };
+    });
+
+    res.json(result);
+  } catch (err: any) {
+    console.error(err);
+    res.status(err?.status ?? 500).json({ error: err?.message ?? 'Failed to record partial fulfillment' });
+  }
+});
+
 async function orderFilePrefix(id: string): Promise<string> {
   const rows = await sql`
-    SELECT o.pi_number, b.customer_name AS buyer_name
+    SELECT o.pi_number, o.part_suffix, b.customer_name AS buyer_name
     FROM sales_orders o
     LEFT JOIN customers b ON b.customer_id = o.buyer_id
     WHERE o.order_id = ${id}
   `;
   if (!rows.length) return id;
   const safe = (s: string) => (s ?? '').replace(/[^a-zA-Z0-9]/g, '_').slice(0, 40);
-  return `${safe(rows[0].pi_number)}_${safe(rows[0].buyer_name)}`;
+  const piLabel = rows[0].part_suffix ? `${rows[0].pi_number}-${rows[0].part_suffix}` : rows[0].pi_number;
+  return `${safe(piLabel)}_${safe(rows[0].buyer_name)}`;
 }
 
 router.post('/:id/upload-proforma', requireAuth, upload.single('file') as any, async (req: Request, res: Response) => {
@@ -483,6 +720,19 @@ router.post('/:id/revise', async (req: Request, res: Response) => {
         VALUES
           (${newOrder.order_id}, ${l.line_number}, ${l.variant_id},
            ${l.num_packages}, ${l.qty_kg}, ${l.rate_per_mt}, ${l.line_amount})
+      `;
+    }
+
+    // The new draft supersedes the source PI (or part) at a new price — the
+    // source's own remaining quantity is no longer available to dispatch
+    // against, so it's closed out here rather than left open to be actioned
+    // twice. (If the source already had earlier parts dispatched/invoiced
+    // under a prior split, those keep their own history untouched — only
+    // this row's status changes.)
+    if (original.status !== 'cancelled') {
+      await sql`
+        UPDATE sales_orders SET status = 'cancelled', status_changed_at = NOW(), updated_at = NOW()
+        WHERE order_id = ${id}
       `;
     }
 

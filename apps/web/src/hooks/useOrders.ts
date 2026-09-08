@@ -62,3 +62,15 @@ export function useReviseOrder(id: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['orders'] }),
   });
 }
+
+export function useSplitOrder(id: string) {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ action, lines }: { action: 'invoiced' | 'dispatched'; lines: Array<{ line_id: string; qty_kg: number; num_packages: number }> }) =>
+      api.splitOrder(id, action, lines),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['orders'] });
+      qc.invalidateQueries({ queryKey: ['order', id] });
+    },
+  });
+}

@@ -1,9 +1,11 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useFiltersContext } from '@/context/FiltersContext';
 import { useOrders } from '@/hooks/useOrders';
-import { fetchOrders } from '@/lib/api';
+import { fetchOrders, fetchCustomers } from '@/lib/api';
 import { formatINR } from '@/lib/calculations';
+import { STATUSES, STATUS_LABELS } from '@/components/FilterBar';
 import StatusBadge from '@/components/StatusBadge';
 import { Plus, Download, ChevronUp, ChevronDown } from 'lucide-react';
 
@@ -14,12 +16,29 @@ const EXPORT_PAGE_SIZE = 200;
 type SortKey = 'pi_number' | 'order_date' | 'buyer_name' | 'agent_name' | 'total_amount' | 'status' | 'submitted_at';
 
 export default function OrdersList() {
-  const { filters } = useFiltersContext();
+  const { filters, setFilter } = useFiltersContext();
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
+  // Local echo of filters.piNumber, debounced into the actual (URL-backed)
+  // filter so every keystroke doesn't trigger its own request.
+  const [piSearch, setPiSearch] = useState(filters.piNumber ?? '');
   const [sortKey, setSortKey] = useState<SortKey>('order_date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+
+  const { data: customerRes } = useQuery({ queryKey: ['customers-filter'], queryFn: () => fetchCustomers(undefined, undefined, 1, 500) });
+  const customers: any[] = customerRes?.data ?? [];
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      if (piSearch !== (filters.piNumber ?? '')) setFilter('piNumber', piSearch || null);
+    }, 300);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [piSearch]);
+
+  // A filter change can easily leave the current page past the end of the
+  // new (smaller) result set — reset to page 1 whenever any filter changes.
+  useEffect(() => { setPage(1); }, [filters.piNumber, filters.customerId, filters.status, filters.dateFrom, filters.dateTo, filters.fyKey, filters.agentId, filters.piFrom, filters.piTo]);
 
   const { data, isLoading } = useOrders(filters, page);
   const rows: any[] = data?.data ?? [];
@@ -39,28 +58,19 @@ export default function OrdersList() {
     return () => document.removeEventListener('mousedown', handler);
   }, [exportMenuOpen]);
 
-  // Same client-side search + sort applied to whatever row set we're given —
-  // shared by the on-screen table and both export paths so "current page"
-  // and "all" stay consistent with what's actually visible/searched.
-  const filterAndSort = useCallback((r: any[]) => {
-    let filtered = r;
-    if (search) {
-      const q = search.toLowerCase();
-      filtered = filtered.filter((o) =>
-        o.pi_number?.toLowerCase().includes(q) ||
-        (o.part_suffix && `${o.pi_number}-${o.part_suffix}`.toLowerCase().includes(q)) ||
-        o.buyer_name?.toLowerCase().includes(q)
-      );
-    }
-    return [...filtered].sort((a, b) => {
+  // PI#/Buyer/Status are all applied server-side now (see useOrders/filters)
+  // — this just sorts whatever row set we're given, shared by the on-screen
+  // table and both export paths so "current page" and "all" stay consistent.
+  const sortRows = useCallback((r: any[]) => {
+    return [...r].sort((a, b) => {
       const av = a[sortKey] ?? '';
       const bv = b[sortKey] ?? '';
       const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true });
       return sortDir === 'asc' ? cmp : -cmp;
     });
-  }, [search, sortKey, sortDir]);
+  }, [sortKey, sortDir]);
 
-  const displayed = useMemo(() => filterAndSort(rows), [rows, filterAndSort]);
+  const displayed = useMemo(() => sortRows(rows), [rows, sortRows]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -110,7 +120,7 @@ export default function OrdersList() {
         all = all.concat(res.data ?? []);
         setExporting({ done: all.length, total: grandTotal });
       }
-      downloadCsv(filterAndSort(all), 'orders_all.csv');
+      downloadCsv(sortRows(all), 'orders_all.csv');
     } finally {
       setExporting(null);
     }
@@ -161,14 +171,51 @@ export default function OrdersList() {
         </div>
       </div>
 
-      <div>
-        <input
-          type="text"
-          placeholder="Search by PI# or buyer name…"
-          className="border border-gray-300 rounded px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-1 focus:ring-blue-500"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-        />
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-gray-500">PI #</label>
+          <input
+            type="text"
+            placeholder="Search PI #…"
+            className="border border-gray-300 rounded px-3 py-1.5 text-sm w-44 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            value={piSearch}
+            onChange={(e) => setPiSearch(e.target.value)}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-gray-500">Buyer</label>
+          <select
+            className="border border-gray-300 rounded px-3 py-1.5 text-sm w-56 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            value={filters.customerId ?? ''}
+            onChange={(e) => setFilter('customerId', e.target.value || null)}
+          >
+            <option value="">All buyers</option>
+            {customers.map((c) => (
+              <option key={c.customer_id} value={c.customer_id}>{c.customer_name}</option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-col gap-1">
+          <label className="text-xs font-medium text-gray-500">Status</label>
+          <select
+            className="border border-gray-300 rounded px-3 py-1.5 text-sm w-48 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            value={filters.status?.[0] ?? ''}
+            onChange={(e) => setFilter('status', e.target.value ? [e.target.value] : null)}
+          >
+            <option value="">All statuses</option>
+            {STATUSES.map((s) => (
+              <option key={s} value={s}>{STATUS_LABELS[s] ?? s}</option>
+            ))}
+          </select>
+        </div>
+        {(filters.piNumber || filters.customerId || filters.status?.length) ? (
+          <button
+            onClick={() => { setPiSearch(''); setFilter('piNumber', null); setFilter('customerId', null); setFilter('status', null); }}
+            className="text-xs text-gray-500 hover:text-red-600 underline pb-2"
+          >
+            Clear filters
+          </button>
+        ) : null}
       </div>
 
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">

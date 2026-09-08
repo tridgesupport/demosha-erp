@@ -48,6 +48,7 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
           AND (${statusFilter}::text[] IS NULL OR o.status = ANY(${statusFilter}::text[]))
           AND (${f.piFrom}::int IS NULL      OR o.seq_number   >= ${f.piFrom}::int)
           AND (${f.piTo}::int IS NULL        OR o.seq_number   <= ${f.piTo}::int)
+          AND (${f.piNumber}::text IS NULL   OR o.pi_number ILIKE '%' || ${f.piNumber}::text || '%')
         GROUP BY o.order_id, b.customer_name, c.customer_name, a.agent_name, fy.fy_label
         ORDER BY o.order_date DESC NULLS LAST, o.seq_number DESC
         LIMIT ${limit} OFFSET ${offset}
@@ -66,6 +67,7 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
           AND (${statusFilter}::text[] IS NULL OR o.status = ANY(${statusFilter}::text[]))
           AND (${f.piFrom}::int IS NULL      OR o.seq_number   >= ${f.piFrom}::int)
           AND (${f.piTo}::int IS NULL        OR o.seq_number   <= ${f.piTo}::int)
+          AND (${f.piNumber}::text IS NULL   OR o.pi_number ILIKE '%' || ${f.piNumber}::text || '%')
       `,
     ]);
 
@@ -655,7 +657,11 @@ router.post('/:id/upload-sales-bill', requireAuth, upload.single('file') as any,
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {
     const prefix = await orderFilePrefix(req.params.id);
-    const { url, fileId } = await uploadToImagekit(req.file.buffer, `${prefix}_sales_bill.pdf`, 'factory_sales_bill');
+    // The sales bill can be a PDF or a photo/scan (accept="..pdf,.jpg,.jpeg,.png"
+    // on the frontend) — the destination name used to hardcode ".pdf"
+    // regardless, mislabeling image uploads. Keep the real extension instead.
+    const ext = (req.file.originalname.match(/\.[a-zA-Z0-9]+$/)?.[0] ?? '').toLowerCase();
+    const { url, fileId } = await uploadToImagekit(req.file.buffer, `${prefix}_sales_bill${ext}`, 'factory_sales_bill');
     await sql`UPDATE sales_orders SET sales_bill_url = ${url}, sales_bill_file_id = ${fileId} WHERE order_id = ${req.params.id}`;
     res.json({ url, fileId });
   } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }

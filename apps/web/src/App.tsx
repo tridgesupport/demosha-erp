@@ -5,7 +5,6 @@ import { Toaster } from '@/components/ui/toaster';
 import { FiltersProvider } from '@/context/FiltersContext';
 import { useAuth } from '@/context/AuthContext';
 import FilterBar from '@/components/FilterBar';
-import Dashboard from '@/pages/Dashboard';
 import Login from '@/pages/Login';
 import ForgotPassword from '@/pages/ForgotPassword';
 import ResetPassword from '@/pages/ResetPassword';
@@ -65,7 +64,9 @@ export const TAB_CONFIG: Record<string, { label: string; links: { to: string; la
   sales: {
     label: 'Sales',
     links: [
-      { to: '/', label: 'Dashboard', exact: true },
+      // Orders is the landing page for this tab (see the root "/" redirect
+      // near the bottom of this file) — Dashboard was removed rather than
+      // kept as a separate first stop.
       { to: '/orders', label: 'Orders' },
       { to: '/customers', label: 'Customers' },
       { to: '/sales/debtors', label: 'Sundry Debtors' },
@@ -217,6 +218,16 @@ function TabGuard({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+// "/" itself isn't a page anymore (Dashboard was removed) — it's just where
+// a bare login, an old bookmark, or the catch-all route below land, so it
+// forwards to whatever the user's own first allowed tab/link actually is.
+function HomeRedirect() {
+  const { user } = useAuth();
+  const allowedTabs = getAllowedTabs(user);
+  const firstAllowed = Object.keys(TAB_CONFIG).find(t => allowedTabs.includes(t));
+  return <Navigate to={firstAllowed ? TAB_CONFIG[firstAllowed].links[0].to : '/settings'} replace />;
+}
+
 function ComingSoon({ label }: { label: string }) {
   return (
     <div className="flex flex-col items-center justify-center py-32 text-gray-400">
@@ -358,7 +369,7 @@ export default function App() {
           <main className="max-w-screen-2xl mx-auto px-4 py-6">
             <TabGuard>
               <Routes>
-                <Route path="/" element={<Dashboard />} />
+                <Route path="/" element={<HomeRedirect />} />
                 <Route path="/orders" element={<OrdersList />} />
                 <Route path="/orders/new" element={<NewOrder />} />
                 <Route path="/orders/:id" element={<OrderDetail />} />

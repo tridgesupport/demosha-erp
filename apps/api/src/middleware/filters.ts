@@ -10,6 +10,7 @@ export interface ParsedFilters {
   status: string[] | null;
   piFrom: number | null;
   piTo: number | null;
+  piNumber: string | null;
 }
 
 declare global {
@@ -22,7 +23,7 @@ declare global {
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const DATE_RE = /^\d{4}-\d{2}-\d{2}$/;
-const VALID_STATUSES = ['draft', 'sent', 'approved', 'dispatched', 'invoiced', 'cancelled'];
+const VALID_STATUSES = ['draft', 'sent', 'approved', 'sent_to_factory', 'dispatched', 'invoiced', 'cancelled'];
 
 function parseUuid(val: unknown): string | null {
   if (typeof val === 'string' && UUID_RE.test(val)) return val;
@@ -37,6 +38,15 @@ function parseDate(val: unknown): string | null {
 function parseInteger(val: unknown): number | null {
   if (typeof val === 'string' && /^\d+$/.test(val)) return parseInt(val, 10);
   return null;
+}
+
+// Free-text partial match against pi_number — trimmed and length-capped,
+// otherwise passed through as-is (safe from injection either way, since it
+// only ever reaches the DB via a parameterized `sql` template ILIKE clause).
+function parsePiNumber(val: unknown): string | null {
+  if (typeof val !== 'string') return null;
+  const trimmed = val.trim().slice(0, 60);
+  return trimmed.length > 0 ? trimmed : null;
 }
 
 function parseStatus(val: unknown): string[] | null {
@@ -59,6 +69,7 @@ export function filtersMiddleware(req: Request, _res: Response, next: NextFuncti
     status: parseStatus(q.status),
     piFrom: parseInteger(q.piFrom),
     piTo: parseInteger(q.piTo),
+    piNumber: parsePiNumber(q.piNumber),
   };
   next();
 }

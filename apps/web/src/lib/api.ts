@@ -74,6 +74,15 @@ export const updateOrderStatus = (id: string, status: string, comment?: string) 
 export const reviseOrder = (id: string) =>
   request(`/api/orders/${id}/revise`, { method: 'POST' });
 
+// Partial invoice/dispatch — if every line's qty_kg equals its full current
+// quantity this behaves like updateOrderStatus; if any line's qty is less,
+// the PI splits and the response includes `splitOff` (the new sibling part).
+export const splitOrder = (
+  id: string,
+  action: 'invoiced' | 'dispatched',
+  lines: Array<{ line_id: string; qty_kg: number; num_packages: number }>
+) => request(`/api/orders/${id}/split`, { method: 'POST', body: JSON.stringify({ action, lines }) });
+
 export const fetchNextPiNumber = (fyKey: number) =>
   request<{ piNumber: string; seqNumber: number }>(`/api/pi/next-number?fyKey=${fyKey}`);
 

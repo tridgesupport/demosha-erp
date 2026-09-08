@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { useOrder, useUpdateOrderStatus, useReviseOrder } from '@/hooks/useOrders';
+import { useOrder, useUpdateOrderStatus, useReviseOrder, useSplitOrder } from '@/hooks/useOrders';
 import { formatINR } from '@/lib/calculations';
 import StatusBadge from '@/components/StatusBadge';
 import OverdueBadge from '@/components/OverdueBadge';
@@ -11,7 +11,7 @@ import { uploadSalesBill, uploadLr, uploadOrderApprovalAttachment } from '@/lib/
 import { useQueryClient } from '@tanstack/react-query';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
-import { ArrowLeft, CheckCircle, Printer, Upload, FileText, ExternalLink, AlertTriangle, Paperclip } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Printer, Upload, FileText, ExternalLink, AlertTriangle, Paperclip, Layers } from 'lucide-react';
 
 const STATUS_FLOW = ['draft', 'sent', 'approved', 'sent_to_factory', 'invoiced', 'dispatched'];
 
@@ -29,7 +29,9 @@ export default function OrderDetail() {
   const { data: order, isLoading } = useOrder(id);
   const updateStatus = useUpdateOrderStatus(id!);
   const revise = useReviseOrder(id!);
+  const splitOrder = useSplitOrder(id!);
   const [confirming, setConfirming] = useState(false);
+  const [fulfillQty, setFulfillQty] = useState<Record<string, { qty_kg: number; num_packages: number }>>({});
   const [uploading, setUploading] = useState<string | null>(null);
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [generatingProforma, setGeneratingProforma] = useState(false);
@@ -204,7 +206,15 @@ export default function OrderDetail() {
   };
 
   const nextAction = getNextAction();
-  const canRevise = o.status === 'dispatched' || o.status === 'invoiced' || o.status === 'cancelled';
+  // Invoicing/dispatch are the two stages a factory user can do partially —
+  // clicking the button opens a per-line quantity editor instead of firing
+  // the whole-order transition straight away (see the fulfillment panel below).
+  const isFulfillAction = nextAction != null && ['invoiced', 'dispatched'].includes(nextAction.next);
+  // A leftover part (created by a previous partial invoice/dispatch) sits at
+  // sent_to_factory with nothing left to approve — it can still be revised
+  // (re-quoted at a new price) or cancelled outright, same as a fresh PI.
+  const canRevise = ['dispatched', 'invoiced', 'cancelled', 'sent_to_factory'].includes(o.status);
+  const canCancel = ['draft', 'sent', 'approved', 'sent_to_factory'].includes(o.status);
   // Management isn't always around to approve — anyone else with access to this
   // PI (i.e. the salesperson who raised it) can approve it themselves instead,
   // as long as they leave a comment explaining why.
@@ -212,9 +222,36 @@ export default function OrderDetail() {
 
   const handleStatusChange = async () => {
     if (!nextAction) return;
+    if (isFulfillAction) {
+      // First click opens the quantity editor below, pre-filled with the
+      // full remaining quantity on every line; the editor's own Confirm
+      // button calls handleFulfillConfirm.
+      const seed: Record<string, { qty_kg: number; num_packages: number }> = {};
+      for (const l of o.lines ?? []) {
+        seed[l.line_id] = { qty_kg: Number(l.qty_kg), num_packages: Number(l.num_packages) };
+      }
+      setFulfillQty(seed);
+      setConfirming(true);
+      return;
+    }
     if (nextAction.next === 'approved') await generateAndUploadApprovedPdf();
     await updateStatus.mutateAsync({ status: nextAction.next });
     setConfirming(false);
+  };
+
+  const handleFulfillConfirm = async () => {
+    if (!nextAction) return;
+    const lines = (o.lines ?? []).map((l: any) => ({
+      line_id: l.line_id,
+      qty_kg: fulfillQty[l.line_id]?.qty_kg ?? Number(l.qty_kg),
+      num_packages: fulfillQty[l.line_id]?.num_packages ?? Number(l.num_packages),
+    }));
+    const result = await splitOrder.mutateAsync({ action: nextAction.next as 'invoiced' | 'dispatched', lines }) as any;
+    setConfirming(false);
+    if (result?.splitOff) {
+      const label = `${result.splitOff.pi_number}-${result.splitOff.part_suffix}`;
+      alert(`Remaining quantity split off as ${label} — still ${STATUS_LABELS[result.splitOff.status] ?? result.splitOff.status} and visible in Orders List.`);
+    }
   };
 
   const handleRevise = async () => {
@@ -258,7 +295,9 @@ export default function OrderDetail() {
         <div className="flex items-start justify-between">
           <div>
             <div className="flex items-center gap-3">
-              <h1 className="text-2xl font-bold text-gray-900">{o.pi_number}</h1>
+              <h1 className="text-2xl font-bold text-gray-900">
+                {o.pi_number}{o.part_suffix && <span className="text-purple-600">-{o.part_suffix}</span>}
+              </h1>
               <StatusBadge status={o.status} />
               {o.revision_number > 0 && (
                 <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
@@ -303,6 +342,18 @@ export default function OrderDetail() {
                 Superseded by <Link to={`/orders/${o.child_order_id}`} className="underline">{o.child_pi_number}</Link>
               </p>
             )}
+            {o.parts && o.parts.length > 0 && (
+              <div className="flex items-center gap-2 mt-1 flex-wrap">
+                <Layers className="w-3.5 h-3.5 text-purple-500" />
+                <span className="text-xs text-gray-400">Other parts of this PI:</span>
+                {o.parts.map((p: any) => (
+                  <Link key={p.order_id} to={`/orders/${p.order_id}`}
+                    className="text-xs bg-purple-50 text-purple-700 border border-purple-200 rounded-full px-2 py-0.5 hover:bg-purple-100">
+                    {o.pi_number}-{p.part_suffix} · {STATUS_LABELS[p.status] ?? p.status}
+                  </Link>
+                ))}
+              </div>
+            )}
           </div>
           <div className="flex flex-wrap gap-2 justify-end">
             <button onClick={handlePrint} disabled={generatingProforma} className="flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50">
@@ -330,9 +381,9 @@ export default function OrderDetail() {
                   onChange={(e) => e.target.files?.[0] && handleUploadLr(e.target.files[0])} />
               </label>
             )}
-            {nextAction && o.status !== 'cancelled' && (
+            {nextAction && o.status !== 'cancelled' && !(isFulfillAction && confirming) && (
               <button
-                onClick={confirming ? handleStatusChange : () => setConfirming(true)}
+                onClick={isFulfillAction ? handleStatusChange : confirming ? handleStatusChange : () => setConfirming(true)}
                 disabled={updateStatus.isPending || generatingPdf}
                 className="px-4 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
               >
@@ -352,13 +403,71 @@ export default function OrderDetail() {
                 Revise PI
               </button>
             )}
-            {['draft', 'sent', 'approved'].includes(o.status) && (
+            {canCancel && (
               <button onClick={handleCancel} className="px-4 py-1.5 border border-red-300 text-red-600 rounded text-sm hover:bg-red-50">
                 Cancel PI
               </button>
             )}
           </div>
         </div>
+
+        {/* Partial invoice/dispatch — per-line quantity editor */}
+        {isFulfillAction && confirming && (
+          <div className="mt-4 border border-blue-200 bg-blue-50 rounded-lg p-4">
+            <h3 className="font-semibold text-sm text-blue-900 mb-1">{nextAction!.label} — how much now?</h3>
+            <p className="text-xs text-blue-700 mb-3">
+              Enter the quantity being {nextAction!.next === 'invoiced' ? 'invoiced' : 'dispatched'} right now.
+              Leave a line at its full quantity to action all of it. Reducing a line splits the remainder
+              off into a new part (same PI number, next letter) that stays visible to both sales and factory.
+            </p>
+            <table className="w-full text-sm mb-3">
+              <thead>
+                <tr className="text-xs text-blue-800 uppercase">
+                  <th className="text-left pb-1">Description</th>
+                  <th className="text-right pb-1">Full Qty (kg)</th>
+                  <th className="text-right pb-1">Qty Now (kg)</th>
+                  <th className="text-right pb-1">Pkgs Now</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(o.lines ?? []).map((l: any) => (
+                  <tr key={l.line_id}>
+                    <td className="py-1">{l.full_description}</td>
+                    <td className="text-right py-1 text-gray-500">{l.qty_kg}</td>
+                    <td className="text-right py-1">
+                      <input type="number" min={0} max={Number(l.qty_kg)} step="0.001"
+                        value={fulfillQty[l.line_id]?.qty_kg ?? Number(l.qty_kg)}
+                        onChange={(e) => setFulfillQty((prev) => ({
+                          ...prev,
+                          [l.line_id]: { ...prev[l.line_id], qty_kg: parseFloat(e.target.value) || 0 },
+                        }))}
+                        className="w-24 border border-gray-300 rounded px-2 py-1 text-right" />
+                    </td>
+                    <td className="text-right py-1">
+                      <input type="number" min={0} max={Number(l.num_packages)} step="1"
+                        value={fulfillQty[l.line_id]?.num_packages ?? Number(l.num_packages)}
+                        onChange={(e) => setFulfillQty((prev) => ({
+                          ...prev,
+                          [l.line_id]: { ...prev[l.line_id], num_packages: parseInt(e.target.value, 10) || 0 },
+                        }))}
+                        className="w-20 border border-gray-300 rounded px-2 py-1 text-right" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div className="flex gap-2">
+              <button onClick={handleFulfillConfirm} disabled={splitOrder.isPending}
+                className="px-4 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50">
+                {splitOrder.isPending ? 'Saving…' : `Confirm: ${nextAction!.label}`}
+              </button>
+              <button onClick={() => setConfirming(false)} disabled={splitOrder.isPending}
+                className="px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50">
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Status timeline */}
         <div className="mt-6 flex items-center gap-1 flex-wrap">

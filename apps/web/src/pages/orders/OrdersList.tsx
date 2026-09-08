@@ -48,6 +48,7 @@ export default function OrdersList() {
       const q = search.toLowerCase();
       filtered = filtered.filter((o) =>
         o.pi_number?.toLowerCase().includes(q) ||
+        (o.part_suffix && `${o.pi_number}-${o.part_suffix}`.toLowerCase().includes(q)) ||
         o.buyer_name?.toLowerCase().includes(q)
       );
     }
@@ -72,7 +73,7 @@ export default function OrdersList() {
       headers.join(','),
       ...list.map((o) =>
         [
-          o.pi_number, o.fy_label, o.order_date, `"${o.buyer_name}"`, `"${o.consignee_name}"`,
+          o.part_suffix ? `${o.pi_number}-${o.part_suffix}` : o.pi_number, o.fy_label, o.order_date, `"${o.buyer_name}"`, `"${o.consignee_name}"`,
           `"${o.agent_name}"`, o.total_amount, o.status,
           o.status_changed_at ? new Date(o.status_changed_at).toLocaleString() : '',
           o.line_count,
@@ -218,7 +219,9 @@ export default function OrdersList() {
                     className="hover:bg-blue-50 cursor-pointer"
                     onClick={() => navigate(`/orders/${o.order_id}`)}
                   >
-                    <td className="px-4 py-2.5 font-medium text-blue-600">{o.pi_number}</td>
+                    <td className="px-4 py-2.5 font-medium text-blue-600">
+                      {o.pi_number}{o.part_suffix && <span className="text-purple-600">-{o.part_suffix}</span>}
+                    </td>
                     <td className="px-4 py-2.5 text-gray-600">{o.order_date ? String(o.order_date).slice(0, 10) : '—'}</td>
                     <td className="px-4 py-2.5 font-medium text-gray-800">{o.buyer_name}</td>
                     <td className="px-4 py-2.5 text-gray-600">{o.consignee_name ?? '—'}</td>

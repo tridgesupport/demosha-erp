@@ -20,12 +20,13 @@
 --
 -- NOTE: sales_orders was never created by a migration file in this repo
 -- (see DATA_MAP.md and the migration history starting at 004) — the
--- constraint names dropped below match the reconstructed schema in
--- `Older docs/Mathew ERP/company_abc_schema.sql` (inline `UNIQUE` on
--- pi_number -> default name `sales_orders_pi_number_key`; the named
--- `uq_fy_seq` constraint on (fy_key, seq_number)). Confirm the actual
--- names with `\d sales_orders` in psql before running this against a
--- real database and adjust the DROP CONSTRAINT lines if they differ.
+-- constraint names dropped below were cross-checked at the time against a
+-- reconstructed schema for the predecessor "Mathew ERP" system (since
+-- deleted as stale; it lived at Older docs/Mathew ERP/company_abc_schema.sql),
+-- confirming: inline `UNIQUE` on pi_number -> default name
+-- `sales_orders_pi_number_key`; the named `uq_fy_seq` constraint on
+-- (fy_key, seq_number). Both were verified against the live DB's actual
+-- pg_constraint before this migration ran (2026-09-08) and matched exactly.
 
 ALTER TABLE sales_orders
   ADD COLUMN IF NOT EXISTS part_suffix VARCHAR(3);

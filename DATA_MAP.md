@@ -28,7 +28,10 @@ their own SQL inline against these tables (`purchase_orders`,
 write → this is a new numbered migration, plus the route/UI code that uses
 it. Not a "query," a schema change.
 
-*(`Older docs/company_abc_schema.sql` is an early draft of this — superseded, not live.)*
+*(An early draft of this schema, reconstructed from the predecessor "Mathew
+ERP" system, lived at `Older docs/Mathew ERP/company_abc_schema.sql` — since
+deleted as stale; migration 018's header comment has its own copy of the
+constraint names it was used to cross-check.)*
 
 ## 2. Tally analytics views — `tally-analytics/`
 

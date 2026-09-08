@@ -11,6 +11,7 @@ export interface GlobalFilters {
   status: string[] | null;
   piFrom: number | null;
   piTo: number | null;
+  piNumber: string | null;
 }
 
 interface FiltersContextValue {
@@ -35,6 +36,7 @@ export function FiltersProvider({ children }: { children: React.ReactNode }) {
     status: searchParams.get('status') ? searchParams.get('status')!.split(',') : null,
     piFrom: searchParams.get('piFrom') ? parseInt(searchParams.get('piFrom')!, 10) : null,
     piTo: searchParams.get('piTo') ? parseInt(searchParams.get('piTo')!, 10) : null,
+    piNumber: searchParams.get('piNumber'),
   }), [searchParams]);
 
   const activeCount = useMemo(() => {

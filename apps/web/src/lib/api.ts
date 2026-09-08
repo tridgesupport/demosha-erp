@@ -10,6 +10,7 @@ export type GlobalFilters = {
   status?: string[] | null;
   piFrom?: number | null;
   piTo?: number | null;
+  piNumber?: string | null;
 };
 
 function buildParams(filters?: GlobalFilters, extra?: Record<string, string | number | null | undefined>): string {
@@ -24,6 +25,7 @@ function buildParams(filters?: GlobalFilters, extra?: Record<string, string | nu
     if (filters.status && filters.status.length > 0) params.set('status', filters.status.join(','));
     if (filters.piFrom != null) params.set('piFrom', String(filters.piFrom));
     if (filters.piTo != null) params.set('piTo', String(filters.piTo));
+    if (filters.piNumber) params.set('piNumber', filters.piNumber);
   }
   if (extra) {
     Object.entries(extra).forEach(([k, v]) => {

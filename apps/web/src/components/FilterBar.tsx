@@ -5,7 +5,12 @@ import { X, SlidersHorizontal } from 'lucide-react';
 import { format } from 'date-fns';
 import { useState, useRef, useEffect } from 'react';
 
-const STATUSES = ['draft', 'sent', 'approved', 'dispatched', 'invoiced', 'cancelled'];
+export const STATUSES = ['draft', 'sent', 'approved', 'sent_to_factory', 'invoiced', 'dispatched', 'cancelled'];
+export const STATUS_LABELS: Record<string, string> = {
+  draft: 'Draft', sent: 'Sent for Approval', approved: 'Approved',
+  sent_to_factory: 'Sent to Factory', invoiced: 'Invoiced',
+  dispatched: 'Dispatched', cancelled: 'Cancelled',
+};
 
 export default function FilterBar() {
   const { filters, setFilter, clearAll, activeCount } = useFiltersContext();
@@ -214,7 +219,7 @@ export default function FilterBar() {
                         : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
                     }`}
                   >
-                    {s}
+                    {STATUS_LABELS[s] ?? s}
                   </button>
                 ))}
               </div>

@@ -11,6 +11,8 @@ import TotalsSidebar from '@/components/TotalsSidebar';
 import OutstandingWarningBanner from '@/components/OutstandingWarningBanner';
 import { format } from 'date-fns';
 
+const PAYMENT_TERMS_OPTIONS = [0, 15, 30, 45, 60, 75, 90, 120, 180, 365];
+
 export default function NewOrder() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
@@ -32,7 +34,7 @@ export default function NewOrder() {
   const [buyerGstin, setBuyerGstin] = useState('');
   const [buyerStateCode, setBuyerStateCode] = useState<number | null>(null);
   const [buyerPoNumber, setBuyerPoNumber] = useState('');
-  const [buyerOrderDate, setBuyerOrderDate] = useState('');
+  const [buyerOrderDate, setBuyerOrderDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [sameAsbuyer, setSameAsBuyer] = useState(true);
   const [consigneeName, setConsigneeName] = useState('');
   const [consigneeAddress, setConsigneeAddress] = useState('');
@@ -47,6 +49,11 @@ export default function NewOrder() {
   const [isSavingConsignee, setIsSavingConsignee] = useState(false);
   const [agentId, setAgentId] = useState('');
   const [paymentTermsDays, setPaymentTermsDays] = useState<number | ''>('');
+  // Whether the payment-terms dropdown is showing the free-entry "Other" box
+  // — separate from paymentTermsDays itself (the actual value sent to the
+  // API either way) so a value outside the standard list still renders as
+  // "Other" with that value pre-filled, e.g. when autofilled from a customer.
+  const [paymentTermsOther, setPaymentTermsOther] = useState(false);
   const [showNewCustomerModal, setShowNewCustomerModal] = useState(false);
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
   const [lineErrors, setLineErrors] = useState<Record<number, string>>({});
@@ -89,7 +96,10 @@ export default function NewOrder() {
       setBuyerAddress(c.address ?? '');
       setBuyerGstin(c.gstin ?? '');
       setBuyerStateCode(c.primary_state_code ?? null);
-      if (c.payment_terms_days != null) setPaymentTermsDays(c.payment_terms_days);
+      if (c.payment_terms_days != null) {
+        setPaymentTermsDays(c.payment_terms_days);
+        setPaymentTermsOther(!PAYMENT_TERMS_OPTIONS.includes(c.payment_terms_days));
+      }
       setSameAsBuyer(true);
       setGstType(determineGstType(c.primary_state_code));
     }
@@ -441,15 +451,37 @@ export default function NewOrder() {
                 </select>
               </Field>
               <Field label="Payment Terms (Days)">
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
+                <select
                   className="input"
-                  placeholder="e.g. 30"
-                  value={paymentTermsDays}
-                  onChange={(e) => setPaymentTermsDays(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
-                />
+                  value={paymentTermsOther ? 'other' : paymentTermsDays}
+                  onChange={(e) => {
+                    if (e.target.value === 'other') {
+                      setPaymentTermsOther(true);
+                      setPaymentTermsDays('');
+                    } else {
+                      setPaymentTermsOther(false);
+                      setPaymentTermsDays(e.target.value === '' ? '' : parseInt(e.target.value, 10));
+                    }
+                  }}
+                >
+                  <option value="">Select…</option>
+                  {PAYMENT_TERMS_OPTIONS.map((d) => (
+                    <option key={d} value={d}>{d === 0 ? '0 (Advance)' : `${d} days`}</option>
+                  ))}
+                  <option value="other">Other</option>
+                </select>
+                {paymentTermsOther && (
+                  <input
+                    type="number"
+                    min={0}
+                    step={1}
+                    className="input mt-2"
+                    placeholder="Enter custom days"
+                    autoFocus
+                    value={paymentTermsDays}
+                    onChange={(e) => setPaymentTermsDays(e.target.value === '' ? '' : parseInt(e.target.value, 10))}
+                  />
+                )}
               </Field>
               <Field label="Freight Description">
                 <input

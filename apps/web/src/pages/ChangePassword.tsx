@@ -1,10 +1,12 @@
 import { useState, FormEvent } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { forceChangePassword } from '@/lib/api';
 import { KeyRound } from 'lucide-react';
 
 export default function ChangePassword() {
   const { refreshUser, logout } = useAuth();
+  const navigate = useNavigate();
   const [pw, setPw] = useState('');
   const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
@@ -18,6 +20,12 @@ export default function ChangePassword() {
     try {
       await forceChangePassword(pw);
       await refreshUser();
+      // must_change_password flipping to false in auth state doesn't by
+      // itself move the user off this URL — RequireAuth only redirects TO
+      // /change-password, never away from it. Without this, "Set Password &
+      // Continue" looked like it did nothing until the user signed out and
+      // back in.
+      navigate('/', { replace: true });
     } catch (err: any) {
       setError(err.message ?? 'Failed to change password');
     } finally {

@@ -41,8 +41,10 @@ router.get('/eligible-orders', requireAuth, async (req: Request, res: Response) 
     const rows = await sql`
       SELECT
         o.order_id, o.pi_number, o.buyer_po_number, o.buyer_order_date, o.order_date,
+        o.total_amount,
         b.customer_name AS buyer_name,
-        string_agg(ol.full_description, ' | ' ORDER BY ol.line_number) AS packing_description
+        string_agg(ol.full_description, ' | ' ORDER BY ol.line_number) AS packing_description,
+        SUM(ol.qty_kg)::numeric AS total_qty_kg
       FROM sales_orders o
       LEFT JOIN customers b ON b.customer_id = o.buyer_id
       LEFT JOIN sales_order_lines ol ON ol.order_id = o.order_id
@@ -73,8 +75,14 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
         LEFT JOIN lookup_financial_years fy ON fy.fy_key = ds.fy_key
         WHERE ds.schedule_id = ${req.params.id} AND ds.deleted_at IS NULL
       `,
+      // Product/qty/amount are always read live off the order (via a
+      // correlated subquery, since a line's order_id can be null for a
+      // manually-typed row) rather than copied into dispatch_schedule_lines
+      // — so they never go stale if the order's lines are later revised.
       sql`
-        SELECT dl.*, o.pi_number
+        SELECT dl.*, o.pi_number, o.status AS order_status, o.sales_bill_url, o.total_amount,
+          (SELECT SUM(qty_kg) FROM sales_order_lines WHERE order_id = dl.order_id) AS total_qty_kg,
+          (SELECT string_agg(full_description, ' | ' ORDER BY line_number) FROM sales_order_lines WHERE order_id = dl.order_id) AS product_description
         FROM dispatch_schedule_lines dl
         LEFT JOIN sales_orders o ON o.order_id = dl.order_id
         WHERE dl.schedule_id = ${req.params.id}
@@ -173,34 +181,64 @@ router.put('/:id', requireAuth, requireRole('factory'), async (req: Request, res
 router.patch('/:id/lines/:lineId', requireAuth, requireRole('factory'), async (req: Request, res: Response) => {
   const { tentative_date, dispatched_date, comments } = req.body;
   try {
-    const [line] = await sql`
-      UPDATE dispatch_schedule_lines SET
-        tentative_date  = COALESCE(${tentative_date ?? null}, tentative_date),
-        dispatched_date = COALESCE(${dispatched_date ?? null}, dispatched_date),
-        comments        = COALESCE(${comments ?? null}, comments),
-        updated_at      = NOW()
-      WHERE line_id = ${req.params.lineId} AND schedule_id = ${req.params.id}
-      RETURNING *
-    `;
-    if (!line) return res.status(404).json({ error: 'Line not found' });
-
-    // Auto-update linked order to dispatched
-    if (dispatched_date && line.order_id) {
-      await sql`
-        UPDATE sales_orders SET
-          status        = 'dispatched',
-          dispatched_at = ${dispatched_date}::date,
-          updated_at    = NOW()
-        WHERE order_id = ${line.order_id}
-          AND status = 'sent_to_factory'
-          AND deleted_at IS NULL
+    // Wrapped in a transaction so that if the linked order fails the
+    // invoiced/sales-bill check below, the whole request rolls back — the
+    // schedule line's own dispatched_date never ends up saved while the
+    // order itself was never actually marked dispatched.
+    const line = await sql.begin(async (sql) => {
+      const [existing] = await sql`
+        SELECT order_id FROM dispatch_schedule_lines
+        WHERE line_id = ${req.params.lineId} AND schedule_id = ${req.params.id}
+        FOR UPDATE
       `;
-    }
+      if (!existing) throw Object.assign(new Error('Line not found'), { status: 404 });
+
+      // Auto-update the linked order to dispatched — same rules as the
+      // Orders page (PATCH /orders/:id/status): must already be invoiced,
+      // with a sales bill uploaded. Previously this jumped straight from
+      // sent_to_factory to dispatched, skipping the invoiced stage and the
+      // sales-bill check entirely — fixed here to match, and checked before
+      // the line itself is touched.
+      if (dispatched_date && existing.order_id) {
+        const [ord] = await sql`
+          SELECT status, sales_bill_url FROM sales_orders
+          WHERE order_id = ${existing.order_id} AND deleted_at IS NULL FOR UPDATE
+        `;
+        if (ord) {
+          if (ord.status !== 'invoiced') {
+            throw Object.assign(new Error(`Mark this order Invoiced (in Orders) before dispatching it from here — currently ${ord.status}`), { status: 400 });
+          }
+          if (!ord.sales_bill_url) {
+            throw Object.assign(new Error('Upload the sales bill (in Orders) before marking this order dispatched'), { status: 400 });
+          }
+          await sql`
+            UPDATE sales_orders SET
+              status        = 'dispatched',
+              dispatched_at = ${dispatched_date}::date,
+              updated_at    = NOW()
+            WHERE order_id = ${existing.order_id}
+              AND status = 'invoiced'
+              AND deleted_at IS NULL
+          `;
+        }
+      }
+
+      const [updated] = await sql`
+        UPDATE dispatch_schedule_lines SET
+          tentative_date  = COALESCE(${tentative_date ?? null}, tentative_date),
+          dispatched_date = COALESCE(${dispatched_date ?? null}, dispatched_date),
+          comments        = COALESCE(${comments ?? null}, comments),
+          updated_at      = NOW()
+        WHERE line_id = ${req.params.lineId} AND schedule_id = ${req.params.id}
+        RETURNING *
+      `;
+      return updated;
+    });
 
     res.json(line);
   } catch (err: any) {
     console.error(err);
-    res.status(500).json({ error: err?.message ?? 'Failed to update line' });
+    res.status(err?.status ?? 500).json({ error: err?.message ?? 'Failed to update line' });
   }
 });
 

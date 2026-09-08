@@ -330,6 +330,16 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
   const isInvoiced = status === 'invoiced';
   const isDispatched = status === 'dispatched';
 
+  // The sales bill is the paperwork dispatch is legally contingent on — don't
+  // let a PI move to dispatched without one already uploaded.
+  if (isDispatched) {
+    const check = await sql`SELECT sales_bill_url FROM sales_orders WHERE order_id = ${id} AND deleted_at IS NULL`;
+    if (check.length === 0) return res.status(404).json({ error: 'Order not found' });
+    if (!check[0].sales_bill_url) {
+      return res.status(400).json({ error: 'Upload the sales bill before marking this order dispatched' });
+    }
+  }
+
   // A manager/admin approving goes through as usual. Anyone else approving is
   // "self-approval" — for when management isn't around to sign off — and must
   // leave a comment explaining why, so the reason stays visible to everyone
@@ -401,6 +411,12 @@ router.post('/:id/split', requireAuth, async (req: Request, res: Response) => {
       `;
       if (orderRows.length === 0) throw Object.assign(new Error('Order not found'), { status: 404 });
       const order = orderRows[0] as any;
+
+      // Same rule as the whole-order PATCH /:id/status: no dispatching (full
+      // or partial) without the sales bill already uploaded.
+      if (action === 'dispatched' && !order.sales_bill_url) {
+        throw Object.assign(new Error('Upload the sales bill before marking this order dispatched'), { status: 400 });
+      }
 
       const originalLines = await sql`
         SELECT * FROM sales_order_lines WHERE order_id = ${id} ORDER BY line_number FOR UPDATE

@@ -69,6 +69,10 @@ export const TAB_CONFIG: Record<string, { label: string; links: { to: string; la
       { to: '/orders', label: 'Orders' },
       { to: '/customers', label: 'Customers' },
       { to: '/sales/debtors', label: 'Sundry Debtors' },
+      // Same route/page as management's copy below — sales and factory reach
+      // it from here instead of being given the management tab; management
+      // keeps its own unchanged entry so nothing moves for that role.
+      { to: '/dispatch/schedules', label: 'Dispatch Schedules' },
     ],
   },
   purchase: {
@@ -142,7 +146,10 @@ const ROLE_DEFAULTS: Record<string, string[]> = {
   admin:          ['sales', 'purchase', 'management', 'production', 'analytics'],
   manager:        ['sales', 'purchase', 'management', 'production', 'analytics'],
   salesperson:    ['sales'],
-  factory:        ['purchase', 'management', 'production'],
+  // Dispatch Schedules now lives under the sales tab too (not management —
+  // sales and factory aren't meant to get management's other content), so
+  // factory reaches it via 'sales' instead of 'management'.
+  factory:        ['sales', 'purchase', 'production'],
   plant_incharge: ['production'],
 };
 

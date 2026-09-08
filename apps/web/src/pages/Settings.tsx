@@ -712,12 +712,13 @@ function ProfileTab() {
 function UsersTab() {
   const qc = useQueryClient();
   const { data: roles = [] } = useQuery<string[]>({ queryKey: ['roles'], queryFn: fetchRoles });
-  const [form, setForm] = useState({ name: '', email: '', role: 'salesperson', password: '' });
+  const [form, setForm] = useState({ name: '', email: '', phone: '', role: 'salesperson', password: '' });
   const [error, setError] = useState('');
+  const [createMsg, setCreateMsg] = useState('');
   const [resetId, setResetId] = useState<string | null>(null);
   const [newPw, setNewPw] = useState('');
   const [savingRoleId, setSavingRoleId] = useState<string | null>(null);
-  const [resetLinks, setResetLinks] = useState<Record<string, string>>({});
+  const [resetLinks, setResetLinks] = useState<Record<string, { url: string; emailed: boolean }>>({});
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [generatingId, setGeneratingId] = useState<string | null>(null);
 
@@ -727,13 +728,21 @@ function UsersTab() {
   });
 
   const createUser = async (e: React.FormEvent) => {
-    e.preventDefault(); setError('');
+    e.preventDefault(); setError(''); setCreateMsg('');
     const res = await fetch(`${BASE}/api/auth/register`, {
       method: 'POST', headers: { 'Content-Type': 'application/json', ...authHeader() },
       body: JSON.stringify(form),
     });
-    if (res.ok) { setForm({ name: '', email: '', role: 'salesperson', password: '' }); qc.invalidateQueries({ queryKey: ['admin-users'] }); }
-    else { const e = await res.json(); setError(e.error ?? 'Failed'); }
+    const data = await res.json();
+    if (res.ok) {
+      setForm({ name: '', email: '', phone: '', role: 'salesperson', password: '' });
+      qc.invalidateQueries({ queryKey: ['admin-users'] });
+      setCreateMsg(data.emailed
+        ? 'User created — invite email sent so they can set their own password.'
+        : 'User created, but the invite email could not be sent. Share the temp password directly, or use "Reset link" below.');
+    } else {
+      setError(data.error ?? 'Failed');
+    }
   };
 
   const deleteUser = async (id: string) => {
@@ -766,7 +775,7 @@ function UsersTab() {
     setGeneratingId(id);
     try {
       const data = await generateResetLink(id);
-      setResetLinks(prev => ({ ...prev, [id]: data.reset_url }));
+      setResetLinks(prev => ({ ...prev, [id]: { url: data.reset_url, emailed: data.emailed } }));
     } finally {
       setGeneratingId(null);
     }
@@ -791,6 +800,7 @@ function UsersTab() {
           <thead><tr className="border-b text-xs text-gray-400 uppercase">
             <th className="px-4 py-2 text-left">Name</th>
             <th className="px-4 py-2 text-left">Email</th>
+            <th className="px-4 py-2 text-left">Phone</th>
             <th className="px-4 py-2 text-left">Role</th>
             <th className="px-4 py-2 text-left">Created</th>
             <th className="px-4 py-2 text-right">Actions</th>
@@ -805,6 +815,7 @@ function UsersTab() {
                   )}
                 </td>
                 <td className="px-4 py-2 text-gray-500">{u.email}</td>
+                <td className="px-4 py-2 text-gray-500">{u.phone ?? '—'}</td>
                 <td className="px-4 py-2">
                   <select
                     className="border border-gray-200 rounded px-1.5 py-0.5 text-xs bg-white disabled:opacity-50"
@@ -846,13 +857,18 @@ function UsersTab() {
                     )}
                     {/* Show generated reset link inline */}
                     {resetLinks[u.user_id] && resetId !== u.user_id && (
-                      <div className="flex items-center gap-1 max-w-xs">
-                        <input readOnly value={resetLinks[u.user_id]}
-                          className="border border-gray-200 rounded px-1.5 py-0.5 text-xs bg-gray-50 text-gray-500 w-48 truncate" />
-                        <button onClick={() => handleCopy(u.user_id, resetLinks[u.user_id])}
-                          className="text-gray-400 hover:text-green-600">
-                          {copiedId === u.user_id ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
-                        </button>
+                      <div className="flex flex-col items-end gap-0.5">
+                        <div className="flex items-center gap-1 max-w-xs">
+                          <input readOnly value={resetLinks[u.user_id].url}
+                            className="border border-gray-200 rounded px-1.5 py-0.5 text-xs bg-gray-50 text-gray-500 w-48 truncate" />
+                          <button onClick={() => handleCopy(u.user_id, resetLinks[u.user_id].url)}
+                            className="text-gray-400 hover:text-green-600">
+                            {copiedId === u.user_id ? <Check className="w-3.5 h-3.5 text-green-600" /> : <Copy className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                        <span className={`text-[11px] ${resetLinks[u.user_id].emailed ? 'text-green-600' : 'text-amber-600'}`}>
+                          {resetLinks[u.user_id].emailed ? 'Emailed ✓' : 'Email failed — share link manually'}
+                        </span>
                       </div>
                     )}
                   </div>
@@ -865,13 +881,13 @@ function UsersTab() {
 
       <div className="bg-white border border-gray-200 rounded-lg p-5 max-w-md">
         <h2 className="font-semibold text-gray-800 mb-1 text-sm">Add User</h2>
-        <p className="text-xs text-gray-400 mb-4">New users will be prompted to set their password on first login.</p>
+        <p className="text-xs text-gray-400 mb-4">The temp password below lets you hand off access immediately — the new user will also get an email with a link to set their own password.</p>
         <form onSubmit={createUser} className="space-y-3">
-          {[['name', 'Full Name', 'text'], ['email', 'Email', 'email'], ['password', 'Temporary Password', 'password']].map(([f, label, type]) => (
+          {[['name', 'Full Name', 'text'], ['email', 'Email', 'email'], ['phone', 'Phone', 'tel'], ['password', 'Temporary Password', 'password']].map(([f, label, type]) => (
             <div key={f}>
-              <label className="block text-xs text-gray-500 mb-1">{label}</label>
+              <label className="block text-xs text-gray-500 mb-1">{label}{f === 'phone' ? ' (optional)' : ''}</label>
               <input type={type} className="input w-full" value={(form as any)[f]}
-                onChange={(e) => setForm(p => ({ ...p, [f]: e.target.value }))} required />
+                onChange={(e) => setForm(p => ({ ...p, [f]: e.target.value }))} required={f !== 'phone'} />
             </div>
           ))}
           <div>
@@ -881,6 +897,7 @@ function UsersTab() {
             </select>
           </div>
           {error && <p className="text-xs text-red-600">{error}</p>}
+          {createMsg && <p className="text-xs text-green-600">{createMsg}</p>}
           <button type="submit" className="flex items-center gap-1 px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">
             <Plus className="w-4 h-4" /> Add User
           </button>

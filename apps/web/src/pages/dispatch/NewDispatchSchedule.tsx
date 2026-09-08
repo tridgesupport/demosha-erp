@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { format } from 'date-fns';
 import { fetchFinancialYears } from '@/lib/api';
+import { formatINR } from '@/lib/calculations';
 import { useEligibleOrders, useCreateDispatchSchedule } from '@/hooks/useDispatchSchedules';
 import { ArrowLeft, Plus, Trash2 } from 'lucide-react';
 
@@ -13,6 +14,13 @@ interface Line {
   customer_name: string;
   comments: string;
   tentative_date: string;
+  // Display-only — pulled from the order when picked from the eligible list,
+  // never sent to the API (schedule lines always re-read these live off the
+  // order, not from a copy). Blank for a manually-typed row.
+  pi_number?: string;
+  product_description?: string;
+  total_qty_kg?: number | null;
+  total_amount?: number | null;
 }
 
 function emptyLine(): Line {
@@ -58,6 +66,10 @@ export default function NewDispatchSchedule() {
         customer_name: order.buyer_name ?? '',
         comments: order.packing_description ?? '',
         tentative_date: '',
+        pi_number: order.pi_number,
+        product_description: order.packing_description,
+        total_qty_kg: order.total_qty_kg,
+        total_amount: order.total_amount,
       }]);
     }
   };
@@ -170,7 +182,9 @@ export default function NewDispatchSchedule() {
                   <th className="text-left px-3 py-2 font-medium text-gray-600">Buyer PO No.</th>
                   <th className="text-left px-3 py-2 font-medium text-gray-600">PO Date</th>
                   <th className="text-left px-3 py-2 font-medium text-gray-600">Customer</th>
-                  <th className="text-left px-3 py-2 font-medium text-gray-600">Packing</th>
+                  <th className="text-left px-3 py-2 font-medium text-gray-600">Product / Packing</th>
+                  <th className="text-right px-3 py-2 font-medium text-gray-600">Qty (kg)</th>
+                  <th className="text-right px-3 py-2 font-medium text-gray-600">Amount</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -190,6 +204,8 @@ export default function NewDispatchSchedule() {
                     </td>
                     <td className="px-3 py-2 text-gray-700">{o.buyer_name}</td>
                     <td className="px-3 py-2 text-gray-500 max-w-xs truncate">{o.packing_description}</td>
+                    <td className="px-3 py-2 text-right text-gray-700">{o.total_qty_kg != null ? Number(o.total_qty_kg).toLocaleString('en-IN') : '—'}</td>
+                    <td className="px-3 py-2 text-right text-gray-700">{formatINR(o.total_amount)}</td>
                   </tr>
                 ))}
               </tbody>
@@ -218,6 +234,7 @@ export default function NewDispatchSchedule() {
               <thead className="bg-gray-50">
                 <tr>
                   <th className="text-left px-2 py-2 font-medium text-gray-600 w-6">#</th>
+                  <th className="text-left px-2 py-2 font-medium text-gray-600">PI / Product / Qty / Amount</th>
                   <th className="text-left px-2 py-2 font-medium text-gray-600">PO Number</th>
                   <th className="text-left px-2 py-2 font-medium text-gray-600">PO Recd. Date</th>
                   <th className="text-left px-2 py-2 font-medium text-gray-600">Customer</th>
@@ -230,6 +247,17 @@ export default function NewDispatchSchedule() {
                 {lines.map((line, idx) => (
                   <tr key={idx}>
                     <td className="px-2 py-2 text-gray-500">{idx + 1}</td>
+                    <td className="px-2 py-2 text-xs text-gray-500 max-w-[160px]">
+                      {line.order_id ? (
+                        <>
+                          <div className="font-medium text-blue-700">{line.pi_number}</div>
+                          <div className="truncate" title={line.product_description}>{line.product_description || '—'}</div>
+                          <div>{line.total_qty_kg != null ? `${Number(line.total_qty_kg).toLocaleString('en-IN')} kg` : ''} · {formatINR(line.total_amount)}</div>
+                        </>
+                      ) : (
+                        <span className="italic text-gray-400">manual row</span>
+                      )}
+                    </td>
                     <td className="px-2 py-1">
                       <input type="text" className="w-full border border-gray-200 rounded px-2 py-1 text-sm"
                         value={line.po_number} onChange={e => updateLine(idx, 'po_number', e.target.value)} />

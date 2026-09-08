@@ -5,6 +5,7 @@ import { jsPDF } from 'jspdf';
 import { ArrowLeft, Download, ExternalLink } from 'lucide-react';
 import { useDispatchSchedule, useUpdateDispatchScheduleLine } from '@/hooks/useDispatchSchedules';
 import { uploadDispatchSchedulePdf } from '@/lib/api';
+import { formatINR } from '@/lib/calculations';
 import { useAuth } from '@/context/AuthContext';
 import DispatchSchedulePdf from '@/components/DispatchSchedulePdf';
 
@@ -22,6 +23,7 @@ export default function DispatchScheduleDetail() {
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [editingLine, setEditingLine] = useState<string | null>(null);
   const [lineEdits, setLineEdits] = useState<Record<string, any>>({});
+  const [lineError, setLineError] = useState<string | null>(null);
 
   const isFactory = user?.role === 'factory';
 
@@ -35,8 +37,15 @@ export default function DispatchScheduleDetail() {
   const saveLineEdit = async (lineId: string) => {
     const edits = lineEdits[lineId];
     if (!edits) return;
-    await updateLine.mutateAsync({ lineId, body: edits });
-    setEditingLine(null);
+    setLineError(null);
+    try {
+      await updateLine.mutateAsync({ lineId, body: edits });
+      setEditingLine(null);
+    } catch (err: any) {
+      // Most commonly: the linked order isn't invoiced yet, or has no sales
+      // bill uploaded — both required before a line can be marked dispatched.
+      setLineError(err?.message ?? 'Failed to save');
+    }
   };
 
   const generatePdf = async () => {
@@ -125,15 +134,24 @@ export default function DispatchScheduleDetail() {
         </div>
       )}
 
+      {lineError && (
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">
+          {lineError}
+        </div>
+      )}
+
       {/* Lines table */}
       <div className="bg-white rounded-xl border border-gray-200 overflow-hidden mb-6">
+        <div className="overflow-x-auto">
         <table className="w-full text-sm">
           <thead className="bg-gray-50 border-b border-gray-200">
             <tr>
               <th className="text-left px-4 py-3 font-semibold text-gray-700 w-8">#</th>
-              <th className="text-left px-4 py-3 font-semibold text-gray-700">PO Number</th>
-              <th className="text-left px-4 py-3 font-semibold text-gray-700">PO Recd. Date</th>
+              <th className="text-left px-4 py-3 font-semibold text-gray-700">PI / PO Number</th>
               <th className="text-left px-4 py-3 font-semibold text-gray-700">Customer</th>
+              <th className="text-left px-4 py-3 font-semibold text-gray-700">Product</th>
+              <th className="text-right px-4 py-3 font-semibold text-gray-700">Qty (kg)</th>
+              <th className="text-right px-4 py-3 font-semibold text-gray-700">Amount</th>
               <th className="text-left px-4 py-3 font-semibold text-gray-700">Comments</th>
               <th className="text-center px-4 py-3 font-semibold text-gray-700">Tentative Date</th>
               <th className="text-center px-4 py-3 font-semibold text-gray-700">Dispatched Date</th>
@@ -154,9 +172,12 @@ export default function DispatchScheduleDetail() {
                       </Link>
                     ) : null}
                     <div className="text-gray-700">{line.po_number ?? '—'}</div>
+                    <div className="text-gray-400 text-xs">{fmt(line.po_received_date)}</div>
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{fmt(line.po_received_date)}</td>
                   <td className="px-4 py-3 font-medium text-gray-800">{line.customer_name ?? '—'}</td>
+                  <td className="px-4 py-3 text-gray-500 max-w-xs text-xs truncate" title={line.product_description ?? undefined}>{line.product_description ?? '—'}</td>
+                  <td className="px-4 py-3 text-right text-gray-700">{line.total_qty_kg != null ? Number(line.total_qty_kg).toLocaleString('en-IN') : '—'}</td>
+                  <td className="px-4 py-3 text-right text-gray-700">{formatINR(line.total_amount)}</td>
                   <td className="px-4 py-3 text-gray-500 max-w-xs text-xs whitespace-pre-wrap">{line.comments ?? '—'}</td>
                   <td className="px-4 py-3 text-center text-gray-700">
                     {isEditing ? (
@@ -170,10 +191,14 @@ export default function DispatchScheduleDetail() {
                       <input type="date" className="border border-gray-300 rounded px-2 py-1 text-sm w-36"
                         defaultValue={line.dispatched_date ? String(line.dispatched_date).slice(0, 10) : ''}
                         onChange={e => handleLineEdit(line.line_id, 'dispatched_date', e.target.value)} />
+                    ) : line.dispatched_date ? (
+                      <span className="text-green-700 font-medium">{fmt(line.dispatched_date)}</span>
+                    ) : line.order_id && line.order_status !== 'invoiced' ? (
+                      <span className="text-amber-600 text-xs" title="Mark this order Invoiced in Orders before it can be dispatched">Not invoiced yet</span>
+                    ) : line.order_id && !line.sales_bill_url ? (
+                      <span className="text-amber-600 text-xs" title="Upload the sales bill in Orders before this order can be dispatched">No sales bill</span>
                     ) : (
-                      <span className={line.dispatched_date ? 'text-green-700 font-medium' : 'text-gray-400'}>
-                        {fmt(line.dispatched_date)}
-                      </span>
+                      <span className="text-gray-400">—</span>
                     )}
                   </td>
                   {isFactory && (
@@ -209,6 +234,7 @@ export default function DispatchScheduleDetail() {
             })}
           </tbody>
         </table>
+        </div>
       </div>
 
       {/* Hidden PDF render target */}

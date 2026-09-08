@@ -206,6 +206,9 @@ export default function OrderDetail() {
   };
 
   const nextAction = getNextAction();
+  // The sales bill is mandatory paperwork before dispatch (enforced by the
+  // API too — this just stops factory from hitting that rejection blind).
+  const dispatchNeedsSalesBill = nextAction?.next === 'dispatched' && !o.sales_bill_url;
   // Invoicing/dispatch are the two stages a factory user can do partially —
   // clicking the button opens a per-line quantity editor instead of firing
   // the whole-order transition straight away (see the fulfillment panel below).
@@ -342,6 +345,11 @@ export default function OrderDetail() {
                 Superseded by <Link to={`/orders/${o.child_order_id}`} className="underline">{o.child_pi_number}</Link>
               </p>
             )}
+            {dispatchNeedsSalesBill && (
+              <p className="text-xs text-orange-500 mt-1">
+                Upload the sales bill (below) before this order can be marked dispatched.
+              </p>
+            )}
             {o.parts && o.parts.length > 0 && (
               <div className="flex items-center gap-2 mt-1 flex-wrap">
                 <Layers className="w-3.5 h-3.5 text-purple-500" />
@@ -384,7 +392,8 @@ export default function OrderDetail() {
             {nextAction && o.status !== 'cancelled' && !(isFulfillAction && confirming) && (
               <button
                 onClick={isFulfillAction ? handleStatusChange : confirming ? handleStatusChange : () => setConfirming(true)}
-                disabled={updateStatus.isPending || generatingPdf}
+                disabled={updateStatus.isPending || generatingPdf || dispatchNeedsSalesBill}
+                title={dispatchNeedsSalesBill ? 'Upload the sales bill before marking this order dispatched' : undefined}
                 className="px-4 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
               >
                 {generatingPdf ? 'Generating PDF…' : updateStatus.isPending ? 'Saving…' : confirming ? `Confirm: ${nextAction.label}` : nextAction.label}
@@ -419,6 +428,7 @@ export default function OrderDetail() {
               Enter the quantity being {nextAction!.next === 'invoiced' ? 'invoiced' : 'dispatched'} right now.
               Leave a line at its full quantity to action all of it. Reducing a line splits the remainder
               off into a new part (same PI number, next letter) that stays visible to both sales and factory.
+              Pkgs Now scales with quantity automatically — adjust it by hand if packaging doesn't split evenly.
             </p>
             <table className="w-full text-sm mb-3">
               <thead>
@@ -437,10 +447,19 @@ export default function OrderDetail() {
                     <td className="text-right py-1">
                       <input type="number" min={0} max={Number(l.qty_kg)} step="0.001"
                         value={fulfillQty[l.line_id]?.qty_kg ?? Number(l.qty_kg)}
-                        onChange={(e) => setFulfillQty((prev) => ({
-                          ...prev,
-                          [l.line_id]: { ...prev[l.line_id], qty_kg: parseFloat(e.target.value) || 0 },
-                        }))}
+                        onChange={(e) => {
+                          const qty_kg = parseFloat(e.target.value) || 0;
+                          const origQty = Number(l.qty_kg);
+                          const origPkgs = Number(l.num_packages);
+                          // Package count defaults to scaling with quantity (e.g. 1kg
+                          // jars: half the qty -> half the packages) — still editable
+                          // by hand afterward for cases that don't split evenly.
+                          const scaledPkgs = origQty > 0 ? Math.round((qty_kg / origQty) * origPkgs) : origPkgs;
+                          setFulfillQty((prev) => ({
+                            ...prev,
+                            [l.line_id]: { qty_kg, num_packages: Math.min(origPkgs, Math.max(0, scaledPkgs)) },
+                          }));
+                        }}
                         className="w-24 border border-gray-300 rounded px-2 py-1 text-right" />
                     </td>
                     <td className="text-right py-1">

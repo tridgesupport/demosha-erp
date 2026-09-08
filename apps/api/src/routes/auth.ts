@@ -6,6 +6,7 @@ import { randomBytes } from 'crypto';
 import sql from '../db/client';
 import { requireAuth, requireRole } from '../middleware/auth';
 import { uploadToImagekit } from '../lib/imagekit';
+import { sendSetPasswordEmail } from '../lib/brevo';
 import { TAB_LINKS } from '../lib/tab-links';
 
 const router = Router();
@@ -21,6 +22,19 @@ function signToken(user: any) {
 
 function frontendUrl() {
   return (process.env.FRONTEND_URL ?? 'http://localhost:5173').trim();
+}
+
+// Shared by forgot-password, admin register, and admin reset-link: issues a
+// fresh one-time token and emails the set/reset-password link via Brevo.
+// Always returns the link too, so the caller (admin UI) has a fallback to
+// share manually if the email doesn't land.
+async function issueResetLink(userId: string, email: string, name: string, isNewAccount: boolean) {
+  const token = randomBytes(32).toString('hex');
+  await sql`DELETE FROM password_reset_tokens WHERE user_id = ${userId}`;
+  await sql`INSERT INTO password_reset_tokens (user_id, token) VALUES (${userId}, ${token})`;
+  const reset_url = `${frontendUrl()}/reset-password?token=${token}`;
+  const emailed = await sendSetPasswordEmail({ email, name }, reset_url, isNewAccount);
+  return { reset_url, emailed };
 }
 
 // Groups flat {tab, link_path} rows into { [tab]: link_path[] } for the
@@ -128,21 +142,21 @@ router.patch('/force-change-password', requireAuth, async (req: Request, res: Re
   }
 });
 
-// POST /api/auth/forgot-password  (public — generates a reset token)
+// POST /api/auth/forgot-password  (public — generates a reset token and emails it)
 router.post('/forgot-password', async (req: Request, res: Response) => {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'Email is required' });
   try {
-    const users = await sql`SELECT user_id FROM users WHERE email = ${email.toLowerCase()} AND deleted_at IS NULL`;
+    const users = await sql`SELECT user_id, name FROM users WHERE email = ${email.toLowerCase()} AND deleted_at IS NULL`;
     if (users.length === 0) {
-      // Don't reveal whether the email exists; but for internal apps return a hint
-      return res.json({ success: true, reset_url: null });
+      // Don't reveal whether the email exists.
+      return res.json({ success: true });
     }
-    const token = randomBytes(32).toString('hex');
-    await sql`DELETE FROM password_reset_tokens WHERE user_id = ${users[0].user_id}`;
-    await sql`INSERT INTO password_reset_tokens (user_id, token) VALUES (${users[0].user_id}, ${token})`;
-    const reset_url = `${frontendUrl()}/reset-password?token=${token}`;
-    res.json({ success: true, reset_url });
+    const { reset_url, emailed } = await issueResetLink(users[0].user_id, email.toLowerCase(), users[0].name, false);
+    // Only hand the raw link back in the response if the email couldn't be
+    // sent (e.g. Brevo misconfigured) — otherwise the link stays in the
+    // inbox only, same as any normal reset-password flow.
+    res.json({ success: true, reset_url: emailed ? undefined : reset_url });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to process request' });
@@ -195,7 +209,7 @@ router.patch('/users/:id/signature', requireAuth, upload.single('file') as any, 
 router.get('/users', requireAuth, requireRole('admin'), async (_req: Request, res: Response) => {
   try {
     const rows = await sql`
-      SELECT u.user_id, u.email, u.name, u.role, u.created_at, u.must_change_password,
+      SELECT u.user_id, u.email, u.name, u.phone, u.role, u.created_at, u.must_change_password,
         (SELECT COUNT(*)::int FROM password_reset_tokens prt
           WHERE prt.user_id = u.user_id AND prt.used_at IS NULL AND prt.expires_at > NOW()) AS pending_reset
       FROM users u
@@ -210,7 +224,7 @@ router.get('/users', requireAuth, requireRole('admin'), async (_req: Request, re
 
 // POST /api/auth/register  (admin only)
 router.post('/register', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
-  const { email, name, password } = req.body;
+  const { email, name, phone, password } = req.body;
   const role = req.body.role?.toLowerCase();
   if (!email || !name || !role || !password) return res.status(400).json({ error: 'All fields required' });
   const validRoles = await sql`SELECT role_name FROM roles`;
@@ -219,11 +233,15 @@ router.post('/register', requireAuth, requireRole('admin'), async (req: Request,
   try {
     const hash = await bcrypt.hash(password, 10);
     const rows = await sql`
-      INSERT INTO users (email, name, role, password_hash, must_change_password)
-      VALUES (${email.toLowerCase()}, ${name}, ${role}, ${hash}, true)
-      RETURNING user_id, email, name, role, created_at, must_change_password
+      INSERT INTO users (email, name, phone, role, password_hash, must_change_password)
+      VALUES (${email.toLowerCase()}, ${name}, ${phone ?? null}, ${role}, ${hash}, true)
+      RETURNING user_id, email, name, phone, role, created_at, must_change_password
     `;
-    res.status(201).json(rows[0]);
+    // Best-effort: also email the new user a set-your-own-password link, so
+    // they don't have to be told the temp password out of band. Doesn't
+    // block account creation if it fails.
+    const { reset_url, emailed } = await issueResetLink(rows[0].user_id, rows[0].email, rows[0].name, true);
+    res.status(201).json({ ...rows[0], reset_url, emailed });
   } catch (err: any) {
     if (err.code === '23505') return res.status(409).json({ error: 'Email already exists' });
     res.status(500).json({ error: 'Failed to create user' });
@@ -278,16 +296,13 @@ router.patch('/users/:id/must-change-password', requireAuth, requireRole('admin'
   }
 });
 
-// POST /api/auth/users/:id/reset-link  (admin only — generates a shareable reset link)
+// POST /api/auth/users/:id/reset-link  (admin only — generates a reset link and emails it)
 router.post('/users/:id/reset-link', requireAuth, requireRole('admin'), async (req: Request, res: Response) => {
   try {
-    const check = await sql`SELECT user_id FROM users WHERE user_id = ${req.params.id} AND deleted_at IS NULL`;
+    const check = await sql`SELECT user_id, email, name FROM users WHERE user_id = ${req.params.id} AND deleted_at IS NULL`;
     if (!check.length) return res.status(404).json({ error: 'User not found' });
-    const token = randomBytes(32).toString('hex');
-    await sql`DELETE FROM password_reset_tokens WHERE user_id = ${req.params.id}`;
-    await sql`INSERT INTO password_reset_tokens (user_id, token) VALUES (${req.params.id}, ${token})`;
-    const reset_url = `${frontendUrl()}/reset-password?token=${token}`;
-    res.json({ reset_url });
+    const { reset_url, emailed } = await issueResetLink(check[0].user_id, check[0].email, check[0].name, false);
+    res.json({ reset_url, emailed });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to generate reset link' });

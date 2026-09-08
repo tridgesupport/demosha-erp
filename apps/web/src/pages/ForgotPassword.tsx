@@ -7,21 +7,21 @@ export default function ForgotPassword() {
   const [email, setEmail] = useState('');
   const [loading, setLoading] = useState(false);
   const [resetUrl, setResetUrl] = useState<string | null>(null);
-  const [notFound, setNotFound] = useState(false);
+  const [sent, setSent] = useState(false);
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
-    setError(''); setResetUrl(null); setNotFound(false);
+    setError(''); setResetUrl(null); setSent(false);
     setLoading(true);
     try {
       const res = await forgotPassword(email.trim().toLowerCase());
-      if (res.reset_url) {
-        setResetUrl(res.reset_url);
-      } else {
-        setNotFound(true);
-      }
+      // The API never reveals whether the email matched an account. If it
+      // couldn't send an email (e.g. Brevo misconfigured), it falls back to
+      // handing back the raw link so the user isn't stuck.
+      if (res.reset_url) setResetUrl(res.reset_url);
+      else setSent(true);
     } catch (err: any) {
       setError(err.message ?? 'Something went wrong');
     } finally {
@@ -70,16 +70,16 @@ export default function ForgotPassword() {
               Go to Reset Page
             </a>
           </div>
-        ) : notFound ? (
+        ) : sent ? (
           <div className="space-y-4">
-            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-800">
-              No account found for that email address. Please check and try again, or contact your administrator.
+            <div className="bg-green-50 border border-green-200 rounded-lg p-4 text-sm text-green-800">
+              If an account exists for that email, a reset link has been sent. Check your inbox.
             </div>
             <button
-              onClick={() => setNotFound(false)}
+              onClick={() => setSent(false)}
               className="w-full py-2 border border-gray-300 rounded text-sm hover:bg-gray-50"
             >
-              Try again
+              Try a different email
             </button>
           </div>
         ) : (
@@ -101,7 +101,7 @@ export default function ForgotPassword() {
               disabled={loading}
               className="w-full py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
             >
-              {loading ? 'Generating link…' : 'Generate Reset Link'}
+              {loading ? 'Sending…' : 'Send Reset Link'}
             </button>
           </form>
         )}

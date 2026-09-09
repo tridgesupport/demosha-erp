@@ -79,7 +79,7 @@ export default function CustomerCombobox({
         onChange={(e) => handleSearchChange(e.target.value)}
         onFocus={() => { setOpen(true); setDebouncedSearch(search); }}
         placeholder={placeholder}
-        className="input w-full pr-14"
+        className={`input w-full pr-14 ${className}`}
       />
       <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1">
         {value && (

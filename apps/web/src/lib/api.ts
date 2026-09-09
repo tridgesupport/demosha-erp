@@ -48,7 +48,11 @@ async function request<T = any>(path: string, options?: RequestInit): Promise<T>
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ error: res.statusText }));
-    throw new Error(err.error ?? 'Request failed');
+    // `??` only catches null/undefined — a server response with an empty
+    // `error` string (or a blank statusText, which browsers always report
+    // for HTTP/2 responses) used to produce an empty-message Error that
+    // rendered as a bare bullet with no text in the UI. `||` catches that too.
+    throw new Error(err.error || 'Request failed');
   }
   return res.json();
 }
@@ -444,7 +448,7 @@ export const uploadAnalyticalRegister = (file: File) => {
   fd.append('file', file, file.name);
   return fetch(`${BASE_URL}/api/production/analytical-register/upload`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(async r => {
     const body = await r.json();
-    if (!r.ok) throw new Error(body?.error ?? 'Upload failed');
+    if (!r.ok) throw new Error(body?.error || 'Upload failed');
     return body;
   });
 };

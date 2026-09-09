@@ -253,7 +253,7 @@ export default function NewOrder() {
       setValidationErrors([]);
       navigate(`/orders/${res.order_id}`);
     } catch (err: any) {
-      setValidationErrors([err?.message ?? 'Failed to create order']);
+      setValidationErrors([err?.message || 'Failed to create order']);
     }
   };
 
@@ -543,7 +543,7 @@ export default function NewOrder() {
             <div className="bg-red-50 border border-red-300 rounded-lg px-4 py-3">
               <p className="text-sm font-medium text-red-700 mb-1">Please fix the following before submitting:</p>
               <ul className="list-disc list-inside space-y-0.5">
-                {validationErrors.map((e, i) => <li key={i} className="text-sm text-red-600">{e}</li>)}
+                {validationErrors.map((e, i) => <li key={i} className="text-sm text-red-600">{e || 'Something went wrong — please try again.'}</li>)}
               </ul>
             </div>
           )}

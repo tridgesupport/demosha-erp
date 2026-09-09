@@ -78,12 +78,34 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
   }
 });
 
+// get_next_pi_number() atomically advances a persistent per-FY counter — it's
+// meant to be called exactly once per PI that's actually created (see POST /
+// below). This endpoint only *previews* that number on the New PI screen
+// before the user has submitted anything, so it must not consume one for
+// real — otherwise every page load (and every FY change) silently burns a
+// PI number nobody ever uses, and repeat calls (e.g. a user reloading the
+// form) hand back a different, higher number each time.
+// To preview it safely without knowing/duplicating the counter's internal
+// storage or formatting, call the real function inside a transaction and
+// always roll that transaction back — the DB does the real computation, but
+// nothing it touched is persisted.
+class PreviewRollback extends Error {
+  constructor(public piNumber: string) { super('preview-rollback'); }
+}
 router.get('/next-number', async (req: Request, res: Response) => {
   const fyKey = parseInt(String(req.query.fyKey), 10);
   if (isNaN(fyKey)) return res.status(400).json({ error: 'fyKey is required' });
   try {
-    const rows = await sql`SELECT get_next_pi_number(${fyKey}::smallint) AS pi_number`;
-    const pi_number = rows[0].pi_number;
+    let pi_number: string | undefined;
+    try {
+      await sql.begin(async (tx) => {
+        const rows = await tx`SELECT get_next_pi_number(${fyKey}::smallint) AS pi_number`;
+        throw new PreviewRollback(rows[0].pi_number);
+      });
+    } catch (e) {
+      if (e instanceof PreviewRollback) pi_number = e.piNumber;
+      else throw e;
+    }
     const seqNumber = parseInt(String(pi_number).slice(String(fyKey).length), 10) || 0;
     res.json({ piNumber: pi_number, seqNumber });
   } catch (err) {
@@ -113,59 +135,69 @@ router.post('/', async (req: Request, res: Response) => {
   } = req.body;
 
   try {
-    const piRow     = await sql`SELECT get_next_pi_number(${fy_key}::smallint) AS pi_number`;
-    const base_pi   = piRow[0].pi_number;
-    const pi_number = is_revised ? `${base_pi}R` : base_pi;
-    const seq_number = parseInt(String(base_pi).slice(String(fy_key).length), 10) || 0;
+    // get_next_pi_number() permanently advances a per-FY counter — it must
+    // only ever be "spent" on a PI that actually ends up persisted. The
+    // number allocation and both inserts below now share one transaction,
+    // so if anything after the allocation fails (bad line data, a DB
+    // constraint, etc.) the whole thing — including the counter advance —
+    // rolls back instead of quietly burning a PI number on a failed attempt.
+    const { order, pi_number } = await sql.begin(async (tx) => {
+      const piRow     = await tx`SELECT get_next_pi_number(${fy_key}::smallint) AS pi_number`;
+      const base_pi   = piRow[0].pi_number;
+      const pi_number = is_revised ? `${base_pi}R` : base_pi;
+      const seq_number = parseInt(String(base_pi).slice(String(fy_key).length), 10) || 0;
 
-    const orderRows = await sql`
-      INSERT INTO sales_orders (
-        pi_number, fy_key, seq_number, order_date, buyer_order_date, buyer_po_number, po_copy_url,
-        buyer_id, buyer_address, buyer_gstin, buyer_state_code,
-        consignee_id, consignee_name, consignee_address, consignee_gstin, consignee_state_code,
-        agent_id, payment_terms_days, freight_desc, freight_per_kg, insurance_pct,
-        gst_type, igst_rate, cgst_rate, tcs_rate,
-        gross_value, insurance_amount, freight_amount, assessable_value,
-        igst_amount, cgst_amount, sgst_amount, tcs_amount, total_amount,
-        schedule_notes, status, revision_number, is_cancelled
-      ) VALUES (
-        ${pi_number}, ${fy_key}, ${seq_number},
-        ${order_date ?? null}, ${buyer_order_date ?? null}, ${buyer_po_number ?? null}, ${po_copy_url ?? null},
-        ${buyer_id}, ${buyer_address ?? null}, ${buyer_gstin ?? null}, ${buyer_state_code ?? null},
-        ${consignee_id ?? buyer_id},
-        ${consignee_name ?? null},
-        ${consignee_address ?? buyer_address ?? null},
-        ${consignee_gstin  ?? buyer_gstin  ?? null},
-        ${consignee_state_code ?? buyer_state_code ?? null},
-        ${agent_id ?? null}, ${payment_terms_days ?? null}, ${freight_desc ?? null},
-        ${freight_per_kg ?? 0}, ${insurance_pct ?? 0.5},
-        ${gst_type}, ${igst_rate ?? 0}, ${cgst_rate ?? 0}, ${tcs_rate ?? 0},
-        ${gross_value ?? 0}, ${insurance_amount ?? 0}, ${freight_amount ?? 0},
-        ${assessable_value ?? 0},
-        ${igst_amount ?? 0}, ${cgst_amount ?? 0}, ${sgst_amount ?? 0},
-        ${tcs_amount ?? 0}, ${total_amount ?? 0},
-        ${schedule_notes ?? null}, ${status}, 0, false
-      )
-      RETURNING *
-    `;
-    const order = orderRows[0];
-
-    for (let i = 0; i < lines.length; i++) {
-      const { sku_id, variant_id, full_description, qty_kg, rate_per_mt, num_packages, line_amount } = lines[i];
-      await sql`
-        INSERT INTO sales_order_lines
-          (order_id, line_number, sku_id, variant_id, full_description, num_packages, qty_kg, rate_per_mt, line_amount)
-        VALUES
-          (${order.order_id}, ${i + 1},
-           ${sku_id || null}, ${variant_id || null}, ${full_description || null},
-           ${num_packages ?? 0}, ${qty_kg}, ${rate_per_mt}, ${line_amount ?? 0})
+      const orderRows = await tx`
+        INSERT INTO sales_orders (
+          pi_number, fy_key, seq_number, order_date, buyer_order_date, buyer_po_number, po_copy_url,
+          buyer_id, buyer_address, buyer_gstin, buyer_state_code,
+          consignee_id, consignee_name, consignee_address, consignee_gstin, consignee_state_code,
+          agent_id, payment_terms_days, freight_desc, freight_per_kg, insurance_pct,
+          gst_type, igst_rate, cgst_rate, tcs_rate,
+          gross_value, insurance_amount, freight_amount, assessable_value,
+          igst_amount, cgst_amount, sgst_amount, tcs_amount, total_amount,
+          schedule_notes, status, revision_number, is_cancelled
+        ) VALUES (
+          ${pi_number}, ${fy_key}, ${seq_number},
+          ${order_date ?? null}, ${buyer_order_date ?? null}, ${buyer_po_number ?? null}, ${po_copy_url ?? null},
+          ${buyer_id}, ${buyer_address ?? null}, ${buyer_gstin ?? null}, ${buyer_state_code ?? null},
+          ${consignee_id ?? buyer_id},
+          ${consignee_name ?? null},
+          ${consignee_address ?? buyer_address ?? null},
+          ${consignee_gstin  ?? buyer_gstin  ?? null},
+          ${consignee_state_code ?? buyer_state_code ?? null},
+          ${agent_id ?? null}, ${payment_terms_days ?? null}, ${freight_desc ?? null},
+          ${freight_per_kg ?? 0}, ${insurance_pct ?? 0.5},
+          ${gst_type}, ${igst_rate ?? 0}, ${cgst_rate ?? 0}, ${tcs_rate ?? 0},
+          ${gross_value ?? 0}, ${insurance_amount ?? 0}, ${freight_amount ?? 0},
+          ${assessable_value ?? 0},
+          ${igst_amount ?? 0}, ${cgst_amount ?? 0}, ${sgst_amount ?? 0},
+          ${tcs_amount ?? 0}, ${total_amount ?? 0},
+          ${schedule_notes ?? null}, ${status}, 0, false
+        )
+        RETURNING *
       `;
-    }
+      const order = orderRows[0];
+
+      for (let i = 0; i < lines.length; i++) {
+        const { sku_id, variant_id, full_description, qty_kg, rate_per_mt, num_packages, line_amount } = lines[i];
+        await tx`
+          INSERT INTO sales_order_lines
+            (order_id, line_number, sku_id, variant_id, full_description, num_packages, qty_kg, rate_per_mt, line_amount)
+          VALUES
+            (${order.order_id}, ${i + 1},
+             ${sku_id || null}, ${variant_id || null}, ${full_description || null},
+             ${num_packages ?? 0}, ${qty_kg}, ${rate_per_mt}, ${line_amount ?? 0})
+        `;
+      }
+
+      return { order, pi_number };
+    });
 
     res.status(201).json({ ...order, pi_number });
   } catch (err: any) {
     console.error(err);
-    let msg = err?.message ?? 'Failed to create order';
+    let msg = err?.message || 'Failed to create order';
     if (msg.includes('numeric field overflow')) msg = 'A numeric value is too large for its field (check GST rate, TCS rate, insurance %, or freight rate).';
     else if (msg.includes('invalid input syntax for type uuid')) msg = 'A line item has no SKU selected — please select a product for every row.';
     else if (msg.includes('violates not-null')) {
@@ -312,7 +344,7 @@ router.put('/:id', async (req: Request, res: Response) => {
     res.json(orderRows[0]);
   } catch (err: any) {
     console.error(err);
-    res.status(500).json({ error: err?.message ?? 'Failed to update order' });
+    res.status(500).json({ error: err?.message || 'Failed to update order' });
   }
 });
 
@@ -699,64 +731,73 @@ router.post('/:id/revise', async (req: Request, res: Response) => {
     if (origRows.length === 0) return res.status(404).json({ error: 'Order not found' });
     const original = origRows[0];
 
-    const piRow     = await sql`SELECT get_next_pi_number(${original.fy_key}::smallint) AS pi_number`;
-    const pi_number = piRow[0].pi_number;
-    const seq_number = parseInt(String(pi_number).slice(String(original.fy_key).length), 10) || 0;
-    const revision_number = (original.revision_number ?? 0) + 1;
+    // Same reasoning as POST / above: get_next_pi_number() permanently
+    // advances the counter, so the allocation and every write it depends on
+    // (the new revision row, its lines, cancelling the source) share one
+    // transaction — a failure partway through rolls back the counter advance
+    // too, instead of burning a PI number on a revision that never completed.
+    const newOrder = await sql.begin(async (tx) => {
+      const piRow     = await tx`SELECT get_next_pi_number(${original.fy_key}::smallint) AS pi_number`;
+      const pi_number = piRow[0].pi_number;
+      const seq_number = parseInt(String(pi_number).slice(String(original.fy_key).length), 10) || 0;
+      const revision_number = (original.revision_number ?? 0) + 1;
 
-    const newRows = await sql`
-      INSERT INTO sales_orders (
-        pi_number, fy_key, seq_number, order_date, buyer_order_date, buyer_po_number,
-        buyer_id, buyer_address, buyer_gstin, buyer_state_code,
-        consignee_id, consignee_address, consignee_gstin, consignee_state_code,
-        agent_id, payment_terms, freight_desc, freight_per_kg, insurance_pct,
-        gst_type, igst_rate, cgst_rate, tcs_rate,
-        gross_value, insurance_amount, freight_amount, assessable_value,
-        igst_amount, cgst_amount, sgst_amount, tcs_amount, total_amount,
-        schedule_notes, status, parent_order_id, revision_number, is_cancelled
-      ) VALUES (
-        ${pi_number}, ${original.fy_key}, ${seq_number},
-        ${original.order_date}, ${original.buyer_order_date}, ${original.buyer_po_number},
-        ${original.buyer_id}, ${original.buyer_address}, ${original.buyer_gstin}, ${original.buyer_state_code},
-        ${original.consignee_id}, ${original.consignee_address}, ${original.consignee_gstin}, ${original.consignee_state_code},
-        ${original.agent_id}, ${original.payment_terms}, ${original.freight_desc},
-        ${original.freight_per_kg}, ${original.insurance_pct},
-        ${original.gst_type}, ${original.igst_rate}, ${original.cgst_rate}, ${original.tcs_rate},
-        ${original.gross_value}, ${original.insurance_amount}, ${original.freight_amount ?? 0},
-        ${original.assessable_value},
-        ${original.igst_amount}, ${original.cgst_amount}, ${original.sgst_amount},
-        ${original.tcs_amount}, ${original.total_amount},
-        ${original.schedule_notes}, 'draft', ${id}, ${revision_number}, false
-      )
-      RETURNING *
-    `;
-    const newOrder = newRows[0];
-
-    const lines: any[] = Array.isArray(original.lines) ? original.lines : [];
-    for (let i = 0; i < lines.length; i++) {
-      const l = lines[i];
-      if (!l.variant_id) continue;
-      await sql`
-        INSERT INTO sales_order_lines
-          (order_id, line_number, variant_id, num_packages, qty_kg, rate_per_mt, line_amount)
-        VALUES
-          (${newOrder.order_id}, ${l.line_number}, ${l.variant_id},
-           ${l.num_packages}, ${l.qty_kg}, ${l.rate_per_mt}, ${l.line_amount})
+      const newRows = await tx`
+        INSERT INTO sales_orders (
+          pi_number, fy_key, seq_number, order_date, buyer_order_date, buyer_po_number,
+          buyer_id, buyer_address, buyer_gstin, buyer_state_code,
+          consignee_id, consignee_address, consignee_gstin, consignee_state_code,
+          agent_id, payment_terms, freight_desc, freight_per_kg, insurance_pct,
+          gst_type, igst_rate, cgst_rate, tcs_rate,
+          gross_value, insurance_amount, freight_amount, assessable_value,
+          igst_amount, cgst_amount, sgst_amount, tcs_amount, total_amount,
+          schedule_notes, status, parent_order_id, revision_number, is_cancelled
+        ) VALUES (
+          ${pi_number}, ${original.fy_key}, ${seq_number},
+          ${original.order_date}, ${original.buyer_order_date}, ${original.buyer_po_number},
+          ${original.buyer_id}, ${original.buyer_address}, ${original.buyer_gstin}, ${original.buyer_state_code},
+          ${original.consignee_id}, ${original.consignee_address}, ${original.consignee_gstin}, ${original.consignee_state_code},
+          ${original.agent_id}, ${original.payment_terms}, ${original.freight_desc},
+          ${original.freight_per_kg}, ${original.insurance_pct},
+          ${original.gst_type}, ${original.igst_rate}, ${original.cgst_rate}, ${original.tcs_rate},
+          ${original.gross_value}, ${original.insurance_amount}, ${original.freight_amount ?? 0},
+          ${original.assessable_value},
+          ${original.igst_amount}, ${original.cgst_amount}, ${original.sgst_amount},
+          ${original.tcs_amount}, ${original.total_amount},
+          ${original.schedule_notes}, 'draft', ${id}, ${revision_number}, false
+        )
+        RETURNING *
       `;
-    }
+      const newOrder = newRows[0];
 
-    // The new draft supersedes the source PI (or part) at a new price — the
-    // source's own remaining quantity is no longer available to dispatch
-    // against, so it's closed out here rather than left open to be actioned
-    // twice. (If the source already had earlier parts dispatched/invoiced
-    // under a prior split, those keep their own history untouched — only
-    // this row's status changes.)
-    if (original.status !== 'cancelled') {
-      await sql`
-        UPDATE sales_orders SET status = 'cancelled', status_changed_at = NOW(), updated_at = NOW()
-        WHERE order_id = ${id}
-      `;
-    }
+      const lines: any[] = Array.isArray(original.lines) ? original.lines : [];
+      for (let i = 0; i < lines.length; i++) {
+        const l = lines[i];
+        if (!l.variant_id) continue;
+        await tx`
+          INSERT INTO sales_order_lines
+            (order_id, line_number, variant_id, num_packages, qty_kg, rate_per_mt, line_amount)
+          VALUES
+            (${newOrder.order_id}, ${l.line_number}, ${l.variant_id},
+             ${l.num_packages}, ${l.qty_kg}, ${l.rate_per_mt}, ${l.line_amount})
+        `;
+      }
+
+      // The new draft supersedes the source PI (or part) at a new price — the
+      // source's own remaining quantity is no longer available to dispatch
+      // against, so it's closed out here rather than left open to be actioned
+      // twice. (If the source already had earlier parts dispatched/invoiced
+      // under a prior split, those keep their own history untouched — only
+      // this row's status changes.)
+      if (original.status !== 'cancelled') {
+        await tx`
+          UPDATE sales_orders SET status = 'cancelled', status_changed_at = NOW(), updated_at = NOW()
+          WHERE order_id = ${id}
+        `;
+      }
+
+      return newOrder;
+    });
 
     res.status(201).json(newOrder);
   } catch (err) {

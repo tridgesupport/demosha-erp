@@ -3,10 +3,11 @@ import { Link, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useFiltersContext } from '@/context/FiltersContext';
 import { useOrders } from '@/hooks/useOrders';
-import { fetchOrders, fetchCustomers } from '@/lib/api';
+import { fetchOrders } from '@/lib/api';
 import { formatINR } from '@/lib/calculations';
 import { STATUSES, STATUS_LABELS } from '@/components/FilterBar';
 import StatusBadge from '@/components/StatusBadge';
+import CustomerCombobox from '@/components/CustomerCombobox';
 import { Plus, Download, ChevronUp, ChevronDown } from 'lucide-react';
 
 // Server page-size cap (see GET /api/orders) — used to page through every
@@ -24,9 +25,6 @@ export default function OrdersList() {
   const [piSearch, setPiSearch] = useState(filters.piNumber ?? '');
   const [sortKey, setSortKey] = useState<SortKey>('order_date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
-
-  const { data: customerRes } = useQuery({ queryKey: ['customers-filter'], queryFn: () => fetchCustomers(undefined, undefined, 1, 500) });
-  const customers: any[] = customerRes?.data ?? [];
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -184,16 +182,12 @@ export default function OrdersList() {
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-gray-500">Buyer</label>
-          <select
-            className="border border-gray-300 rounded px-3 py-1.5 text-sm w-56 focus:outline-none focus:ring-1 focus:ring-blue-500"
-            value={filters.customerId ?? ''}
-            onChange={(e) => setFilter('customerId', e.target.value || null)}
-          >
-            <option value="">All buyers</option>
-            {customers.map((c) => (
-              <option key={c.customer_id} value={c.customer_id}>{c.customer_name}</option>
-            ))}
-          </select>
+          <CustomerCombobox
+            className="w-56"
+            value={filters.customerId ?? null}
+            onChange={(c) => setFilter('customerId', c?.customer_id ?? null)}
+            placeholder="All buyers"
+          />
         </div>
         <div className="flex flex-col gap-1">
           <label className="text-xs font-medium text-gray-500">Status</label>

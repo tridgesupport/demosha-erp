@@ -1,9 +1,10 @@
 import { useFiltersContext } from '@/context/FiltersContext';
 import { useQuery } from '@tanstack/react-query';
-import { fetchFinancialYears, fetchAgents, fetchCustomers } from '@/lib/api';
+import { fetchFinancialYears, fetchAgents, fetchCustomer } from '@/lib/api';
 import { X, SlidersHorizontal } from 'lucide-react';
 import { format } from 'date-fns';
 import { useState, useRef, useEffect } from 'react';
+import CustomerCombobox from '@/components/CustomerCombobox';
 
 export const STATUSES = ['draft', 'sent', 'approved', 'sent_to_factory', 'invoiced', 'dispatched', 'cancelled'];
 export const STATUS_LABELS: Record<string, string> = {
@@ -19,11 +20,14 @@ export default function FilterBar() {
 
   const { data: fyList = [] } = useQuery({ queryKey: ['financial-years'], queryFn: fetchFinancialYears });
   const { data: agents = [] } = useQuery({ queryKey: ['agents'], queryFn: fetchAgents });
-  const { data: customerRes } = useQuery({
-    queryKey: ['customers-filter'],
-    queryFn: () => fetchCustomers(undefined, undefined, 1, 200),
+
+  // Only needed to resolve the active-filter chip's label — the picker itself
+  // searches the server as the user types (see CustomerCombobox).
+  const { data: selectedCustomer } = useQuery({
+    queryKey: ['customer', filters.customerId],
+    queryFn: () => fetchCustomer(filters.customerId as string),
+    enabled: !!filters.customerId,
   });
-  const customers: any[] = customerRes?.data ?? [];
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -90,7 +94,7 @@ export default function FilterBar() {
           )}
           {filters.customerId && (
             <Chip
-              label={`Customer: ${customers.find((c) => c.customer_id === filters.customerId)?.customer_name ?? '…'}`}
+              label={`Customer: ${selectedCustomer?.customer_name ?? '…'}`}
               onRemove={() => setFilter('customerId', null)}
             />
           )}
@@ -156,16 +160,11 @@ export default function FilterBar() {
             {/* Customer */}
             <div className="flex flex-col gap-1">
               <label className="text-xs font-medium text-gray-500">Customer / Buyer</label>
-              <select
-                className="border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-blue-500"
-                value={filters.customerId ?? ''}
-                onChange={(e) => setFilter('customerId', e.target.value || null)}
-              >
-                <option value="">All customers</option>
-                {customers.map((c) => (
-                  <option key={c.customer_id} value={c.customer_id}>{c.customer_name}</option>
-                ))}
-              </select>
+              <CustomerCombobox
+                value={filters.customerId ?? null}
+                onChange={(c) => setFilter('customerId', c?.customer_id ?? null)}
+                placeholder="All customers"
+              />
             </div>
 
             {/* Agent */}

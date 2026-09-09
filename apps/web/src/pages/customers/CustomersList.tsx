@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useFiltersContext } from '@/context/FiltersContext';
 import { useCustomers } from '@/hooks/useCustomers';
@@ -10,23 +10,23 @@ export default function CustomersList() {
   const { filters } = useFiltersContext();
   const navigate = useNavigate();
   const [search, setSearch] = useState('');
+  // Debounced into the actual query param so every keystroke doesn't fire a
+  // request, and reset to page 1 whenever the search text changes — search
+  // runs server-side across all customers, not just the rows on screen.
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
   const [showModal, setShowModal] = useState(false);
 
-  const { data, isLoading } = useCustomers(filters, undefined, page);
+  useEffect(() => {
+    const t = setTimeout(() => { setDebouncedSearch(search); setPage(1); }, 300);
+    return () => clearTimeout(t);
+  }, [search]);
+
+  const { data, isLoading } = useCustomers(filters, debouncedSearch || undefined, page);
   const rows: any[] = data?.data ?? [];
   const total: number = data?.total ?? 0;
   const totalPages = Math.ceil(total / 50);
-
-  const displayed = useMemo(() => {
-    if (!search) return rows;
-    const q = search.toLowerCase();
-    return rows.filter(
-      (c) =>
-        c.customer_name?.toLowerCase().includes(q) ||
-        c.gstin?.toLowerCase().includes(q)
-    );
-  }, [rows, search]);
+  const displayed = rows;
 
   return (
     <div className="space-y-4">

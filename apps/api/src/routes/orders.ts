@@ -114,10 +114,25 @@ router.get('/next-number', async (req: Request, res: Response) => {
   }
 });
 
-router.post('/upload-po', upload.single('file') as any, (req: Request, res: Response) => {
+router.post('/upload-po', upload.single('file') as any, async (req: Request, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
-  const dataUrl = `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
-  res.json({ url: dataUrl, name: req.file.originalname });
+  try {
+    // This used to hand the file straight back as an inline base64 data:
+    // URL, which the New PI form then embedded directly into the JSON body
+    // of POST /api/orders — a scanned PO of any real size pushed that
+    // request past Express's body-size limit and got rejected with a 413
+    // *before* the order was ever validated or saved (surfacing client-side
+    // as an unexplained, field-less error). Upload it properly instead, the
+    // same way every other document on this order already does, and hand
+    // back a short real URL — there's no order_id yet at this point (the PI
+    // isn't created until submit), so this can't use orderFilePrefix() like
+    // the other upload routes; ImageKit's useUniqueFileName covers naming.
+    const { url, fileId } = await uploadToImagekit(req.file.buffer, req.file.originalname || 'po_copy', 'po_copy');
+    res.json({ url, fileId, name: req.file.originalname });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to upload PO copy' });
+  }
 });
 
 router.post('/', async (req: Request, res: Response) => {

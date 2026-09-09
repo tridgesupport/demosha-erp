@@ -131,7 +131,12 @@ app.use(cors({
   origin: (process.env.FRONTEND_URL ?? 'http://localhost:5173').trim(),
   credentials: true,
 }));
-app.use(express.json());
+// Default body-parser limit is 100kb — comfortably enough for normal JSON
+// payloads (this app no longer inlines files into JSON bodies; uploads go
+// through multer/ImageKit instead), but raised slightly for headroom. If a
+// body still exceeds this, express.json() rejects it with a 413 before any
+// route handler runs.
+app.use(express.json({ limit: '2mb' }));
 app.use((_req, _res, next) => { bootstrapped.then(() => next()).catch(next); });
 
 app.use('/api/auth', authRouter);
@@ -156,6 +161,27 @@ app.get('/', (_req, res) => {
 
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Catch-all error handler. Every route already catches its own errors and
+// responds with JSON, but a handful of failures happen *before* any route
+// runs — a request body over express.json()'s size limit (a 413, the actual
+// cause of the "PI submission failed with a blank error" bug: the response
+// body was never real JSON) or malformed JSON — reach here instead. Without
+// this, Express's own default handler sends an HTML error page, which the
+// frontend's res.json() can't parse; it then fell back to res.statusText,
+// which browsers report as an empty string for HTTP/2 responses, producing
+// an error with no message at all. Must be registered last, and must keep
+// all four handler args — that arity is how Express recognizes it as an
+// error handler rather than ordinary middleware.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+app.use((err: any, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+  console.error(err);
+  const status = err?.status ?? err?.statusCode ?? 500;
+  const message = err?.type === 'entity.too.large'
+    ? 'The request was too large (likely a file attached before saving) — please try a smaller file.'
+    : (err?.message || 'Internal server error');
+  res.status(status).json({ error: message });
 });
 
 export default app;

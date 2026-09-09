@@ -1,8 +1,9 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { fetchFinancialYears, fetchNextPiNumber, fetchAgents, fetchCustomers, fetchConsignees, createConsignee } from '@/lib/api';
+import { fetchFinancialYears, fetchNextPiNumber, fetchAgents, fetchConsignees, createConsignee, fetchCustomer } from '@/lib/api';
 import CustomerFormModal from '@/components/CustomerFormModal';
+import CustomerCombobox from '@/components/CustomerCombobox';
 import { useCreateOrder } from '@/hooks/useOrders';
 import { useStates } from '@/hooks/useCatalog';
 import { calcOrderTotals, determineGstType, formatINR, calcNumPackages, calcLineAmount } from '@/lib/calculations';
@@ -20,7 +21,6 @@ export default function NewOrder() {
 
   const { data: fyList = [] } = useQuery({ queryKey: ['financial-years'], queryFn: fetchFinancialYears });
   const { data: agents = [] } = useQuery({ queryKey: ['agents'], queryFn: fetchAgents });
-  const { data: customerRes } = useQuery({ queryKey: ['customers-filter'], queryFn: () => fetchCustomers(undefined, undefined, 1, 500) });
   const { data: states = [] } = useStates();
 
   const currentFy: any = (fyList as any[]).find((f: any) => f.is_current) ?? (fyList as any[])[0];
@@ -71,11 +71,24 @@ export default function NewOrder() {
   const fe = (name: string) => fieldErrors.has(name) ? '!border-red-400 !bg-red-50' : '';
   const clearFe = (name: string) => setFieldErrors(prev => { const s = new Set(prev); s.delete(name); return s; });
 
-  const customers: any[] = customerRes?.data ?? [];
-
   useEffect(() => {
     if (currentFy) setFyKey(currentFy.fy_key);
   }, [currentFy]);
+
+  // Prefilled buyer (e.g. from a customer's "New Order" link) — fetch it once
+  // to populate address/GSTIN/payment terms, same as picking it from the combobox.
+  const { data: prefillCustomer } = useQuery({
+    queryKey: ['customer', prefillBuyerId],
+    queryFn: () => fetchCustomer(prefillBuyerId as string),
+    enabled: !!prefillBuyerId,
+  });
+  const prefillApplied = useRef(false);
+  useEffect(() => {
+    if (prefillCustomer && !prefillApplied.current) {
+      prefillApplied.current = true;
+      handleBuyerSelect(prefillCustomer);
+    }
+  }, [prefillCustomer]);
 
   const { data: consignees = [], refetch: refetchConsignees } = useQuery({
     queryKey: ['consignees', buyerId],
@@ -89,9 +102,8 @@ export default function NewOrder() {
     enabled: fyKey != null,
   });
 
-  const handleBuyerSelect = (id: string) => {
-    setBuyerId(id);
-    const c = customers.find((c) => c.customer_id === id);
+  const handleBuyerSelect = (c: any | null) => {
+    setBuyerId(c?.customer_id ?? '');
     if (c) {
       setBuyerAddress(c.address ?? '');
       setBuyerGstin(c.gstin ?? '');
@@ -102,6 +114,10 @@ export default function NewOrder() {
       }
       setSameAsBuyer(true);
       setGstType(determineGstType(c.primary_state_code));
+    } else {
+      setBuyerAddress('');
+      setBuyerGstin('');
+      setBuyerStateCode(null);
     }
     setSelectedConsigneeRecordId('');
     setConsigneeName('');
@@ -288,10 +304,12 @@ export default function NewOrder() {
             <div className="grid grid-cols-2 gap-4">
               <Field label="Party Name" className="col-span-2" required>
                 <div className="flex gap-2">
-                  <select className={`input flex-1 ${fe('buyerId')}`} value={buyerId} onChange={(e) => { handleBuyerSelect(e.target.value); clearFe('buyerId'); }}>
-                    <option value="">Select customer…</option>
-                    {customers.map((c) => <option key={c.customer_id} value={c.customer_id}>{c.customer_name}</option>)}
-                  </select>
+                  <CustomerCombobox
+                    className={`flex-1 ${fe('buyerId')}`}
+                    value={buyerId || null}
+                    onChange={(c) => { handleBuyerSelect(c); clearFe('buyerId'); }}
+                    placeholder="Search customer by name or GSTIN…"
+                  />
                   <button
                     type="button"
                     onClick={() => setShowNewCustomerModal(true)}
@@ -306,7 +324,7 @@ export default function NewOrder() {
                   onClose={() => setShowNewCustomerModal(false)}
                   onCreated={(c) => {
                     setShowNewCustomerModal(false);
-                    handleBuyerSelect(c.customer_id);
+                    handleBuyerSelect(c);
                   }}
                 />
               )}

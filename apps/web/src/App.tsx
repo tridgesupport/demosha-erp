@@ -372,6 +372,7 @@ export default function App() {
                 <Route path="/" element={<HomeRedirect />} />
                 <Route path="/orders" element={<OrdersList />} />
                 <Route path="/orders/new" element={<NewOrder />} />
+                <Route path="/orders/:id/edit" element={<NewOrder />} />
                 <Route path="/orders/:id" element={<OrderDetail />} />
                 <Route path="/customers" element={<CustomersList />} />
                 <Route path="/customers/:id" element={<CustomerDetail />} />

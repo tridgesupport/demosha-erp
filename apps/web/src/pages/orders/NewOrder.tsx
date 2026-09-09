@@ -1,10 +1,10 @@
 import { useState, useEffect, useRef } from 'react';
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { useNavigate, useSearchParams, useParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { fetchFinancialYears, fetchNextPiNumber, fetchAgents, fetchConsignees, createConsignee, fetchCustomer } from '@/lib/api';
 import CustomerFormModal from '@/components/CustomerFormModal';
 import CustomerCombobox from '@/components/CustomerCombobox';
-import { useCreateOrder } from '@/hooks/useOrders';
+import { useCreateOrder, useUpdateOrder, useUpdateOrderStatus, useOrder } from '@/hooks/useOrders';
 import { useStates } from '@/hooks/useCatalog';
 import { calcOrderTotals, determineGstType, formatINR, calcNumPackages, calcLineAmount } from '@/lib/calculations';
 import PiLineItemsTable, { LineItem, emptyLineItem } from '@/components/PiLineItemsTable';
@@ -18,6 +18,11 @@ export default function NewOrder() {
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const prefillBuyerId = searchParams.get('buyerId');
+  // Present on /orders/:id/edit only — everything below that reads `id`
+  // switches this form from creating a new PI to editing an existing draft.
+  const { id: editId } = useParams<{ id: string }>();
+  const isEdit = !!editId;
+  const { data: existingOrder, isLoading: loadingExisting } = useOrder(editId);
 
   const { data: fyList = [] } = useQuery({ queryKey: ['financial-years'], queryFn: fetchFinancialYears });
   const { data: agents = [] } = useQuery({ queryKey: ['agents'], queryFn: fetchAgents });
@@ -72,8 +77,12 @@ export default function NewOrder() {
   const clearFe = (name: string) => setFieldErrors(prev => { const s = new Set(prev); s.delete(name); return s; });
 
   useEffect(() => {
-    if (currentFy) setFyKey(currentFy.fy_key);
-  }, [currentFy]);
+    // In edit mode the PI's financial year (and its number) is already
+    // fixed — the populate-from-existingOrder effect below sets fyKey once
+    // instead, and this default-to-current-FY effect would otherwise stomp
+    // on it every time the FY list refetches.
+    if (currentFy && !isEdit) setFyKey(currentFy.fy_key);
+  }, [currentFy, isEdit]);
 
   // Prefilled buyer (e.g. from a customer's "New Order" link) — fetch it once
   // to populate address/GSTIN/payment terms, same as picking it from the combobox.
@@ -99,8 +108,82 @@ export default function NewOrder() {
   const { data: piData } = useQuery({
     queryKey: ['pi-next-number', fyKey],
     queryFn: () => fetchNextPiNumber(fyKey!),
-    enabled: fyKey != null,
+    // A preview-only allocation (see the API route) — pointless (and
+    // confusingly wrong, since the real number is already fixed) in edit mode.
+    enabled: fyKey != null && !isEdit,
   });
+
+  // Load the existing draft's fields into this same form once. Guarded by a
+  // ref (not just `existingOrder` in the deps) so a background refetch of
+  // ['order', editId] — e.g. after the SKU picker creates a catalogue entry —
+  // never clobbers what the user has since typed.
+  const existingApplied = useRef(false);
+  useEffect(() => {
+    if (!isEdit || !existingOrder || existingApplied.current) return;
+    existingApplied.current = true;
+    const o = existingOrder as any;
+    setFyKey(o.fy_key);
+    setOrderDate(o.order_date ? String(o.order_date).slice(0, 10) : format(new Date(), 'yyyy-MM-dd'));
+    setBuyerId(o.buyer_id ?? '');
+    setBuyerAddress(o.buyer_address ?? '');
+    setBuyerGstin(o.buyer_gstin ?? '');
+    setBuyerStateCode(o.buyer_state_code ?? null);
+    setBuyerPoNumber(o.buyer_po_number ?? '');
+    setBuyerOrderDate(o.buyer_order_date ? String(o.buyer_order_date).slice(0, 10) : '');
+    // Creation only ever persists consignee_name when "same as buyer" was
+    // unchecked (see handleSubmit) — its absence is how we know which one it was.
+    const distinctConsignee = !!o.consignee_name;
+    setSameAsBuyer(!distinctConsignee);
+    if (distinctConsignee) {
+      setConsigneeName(o.consignee_name ?? '');
+      setConsigneeAddress(o.consignee_address ?? '');
+      setConsigneeGstin(o.consignee_gstin ?? '');
+      setConsigneeStateCode(o.consignee_state_code ?? null);
+    }
+    setAgentId(o.agent_id ?? '');
+    if (o.payment_terms_days != null) {
+      setPaymentTermsDays(o.payment_terms_days);
+      setPaymentTermsOther(!PAYMENT_TERMS_OPTIONS.includes(o.payment_terms_days));
+    }
+    setFreightDesc(o.freight_desc ?? '');
+    setFreightPerKg(Number(o.freight_per_kg) || 0);
+    setInsurancePct(o.insurance_pct != null ? Number(o.insurance_pct) : 0.5);
+    setGstType(o.gst_type ?? 'IGST');
+    setIgstRate(Number(o.igst_rate) || 0);
+    setCgstRate(Number(o.cgst_rate) || 0);
+    setTcsRate(Number(o.tcs_rate) || 0);
+    setScheduleNotes(o.schedule_notes ?? '');
+    const loadedLines: LineItem[] = (o.lines ?? []).map((l: any) => ({
+      sku_id: l.sku_id ?? '',
+      legacy_code: l.legacy_code != null ? String(l.legacy_code) : '',
+      item: l.item ?? '',
+      grade: l.grade ?? '',
+      qty_per_pkg: l.qty_per_pkg != null ? Number(l.qty_per_pkg) : null,
+      pkg: l.pkg ?? '',
+      full_description: l.full_description ?? '',
+      qty_kg: Number(l.qty_kg) || 0,
+      rate_per_mt: Number(l.rate_per_mt) || 0,
+      num_packages: Number(l.num_packages) || 0,
+      line_amount: Number(l.line_amount) || 0,
+    }));
+    setLines(loadedLines.length > 0 ? loadedLines : [emptyLineItem()]);
+  }, [isEdit, existingOrder]);
+
+  // Once this buyer's saved consignee records load, try to match the loaded
+  // free-text consignee back to one of them by name, purely so the dropdown
+  // shows a selection (and its usual GSTIN/State/Address inputs) instead of
+  // looking unset — the order's own saved values above are already correct
+  // either way.
+  const consigneeMatchApplied = useRef(false);
+  useEffect(() => {
+    if (!isEdit || sameAsbuyer || consigneeMatchApplied.current) return;
+    if (!consignees.length || !consigneeName) return;
+    const match = (consignees as any[]).find(c => c.consignee_name === consigneeName);
+    if (match) {
+      consigneeMatchApplied.current = true;
+      setSelectedConsigneeRecordId(match.consignee_id);
+    }
+  }, [isEdit, sameAsbuyer, consignees, consigneeName]);
 
   const handleBuyerSelect = (c: any | null) => {
     setBuyerId(c?.customer_id ?? '');
@@ -170,6 +253,9 @@ export default function NewOrder() {
   };
 
   const createOrder = useCreateOrder();
+  const updateOrder = useUpdateOrder(editId ?? '');
+  const updateOrderStatus = useUpdateOrderStatus(editId ?? '');
+  const saving = createOrder.isPending || updateOrder.isPending || updateOrderStatus.isPending;
 
   const header = { freight_per_kg: freightPerKg, insurance_pct: insurancePct, gst_type: gstType, igst_rate: igstRate, cgst_rate: cgstRate, tcs_rate: tcsRate };
   const totals = calcOrderTotals(header, lines);
@@ -218,13 +304,14 @@ export default function NewOrder() {
       }
     }
 
-    const body = {
-      fy_key: fyKey,
+    const body: Record<string, unknown> = {
       order_date: orderDate,
       buyer_order_date: buyerOrderDate || null,
       buyer_po_number: buyerPoNumber || null,
+      // Editing keeps whatever PO copy is already on the order unless a new
+      // one was picked here — the PUT endpoint COALESCEs a null through to
+      // the existing url, so this must stay null rather than clobber it.
       po_copy_url: poCopyUrl,
-      is_revised: isRevised,
       buyer_id: buyerId,
       buyer_address: buyerAddress,
       buyer_gstin: buyerGstin,
@@ -245,23 +332,50 @@ export default function NewOrder() {
       tcs_rate: tcsRate,
       ...totals,
       schedule_notes: scheduleNotes || null,
-      status,
       lines: enrichedLines,
     };
     try {
-      const res = await createOrder.mutateAsync(body) as any;
-      setValidationErrors([]);
-      navigate(`/orders/${res.order_id}`);
+      if (isEdit) {
+        await updateOrder.mutateAsync(body);
+        // The PUT endpoint only ever touches draft fields — submitting for
+        // approval is a separate status transition, same as the button on
+        // OrderDetail itself.
+        if (status === 'sent') await updateOrderStatus.mutateAsync({ status: 'sent' });
+        setValidationErrors([]);
+        navigate(`/orders/${editId}`);
+      } else {
+        const res = await createOrder.mutateAsync({ ...body, fy_key: fyKey, is_revised: isRevised, status }) as any;
+        setValidationErrors([]);
+        navigate(`/orders/${res.order_id}`);
+      }
     } catch (err: any) {
-      setValidationErrors([err?.message || 'Failed to create order']);
+      setValidationErrors([err?.message || (isEdit ? 'Failed to save changes' : 'Failed to create order')]);
     }
   };
+
+  if (isEdit && loadingExisting) {
+    return <div className="animate-pulse h-64 bg-gray-200 rounded-lg" />;
+  }
+  if (isEdit && existingOrder && (existingOrder as any).status !== 'draft') {
+    return (
+      <div className="text-center py-16 text-gray-500">
+        Only a draft can be edited — this PI is {(existingOrder as any).status}.
+        <div className="mt-3">
+          <button onClick={() => navigate(`/orders/${editId}`)} className="text-blue-600 underline text-sm">
+            Back to PI
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
       <div className="flex items-center gap-3">
         <button onClick={() => navigate(-1)} className="text-gray-500 hover:text-gray-700 text-sm">← Back</button>
-        <h1 className="text-2xl font-bold text-gray-900">New Proforma Invoice</h1>
+        <h1 className="text-2xl font-bold text-gray-900">
+          {isEdit ? `Edit Pro Forma Invoice — ${(existingOrder as any)?.pi_number ?? ''}` : 'New Proforma Invoice'}
+        </h1>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -270,27 +384,37 @@ export default function NewOrder() {
           <Section title="PI Header">
             <div className="grid grid-cols-4 gap-4">
               <Field label="Financial Year" required>
-                <select
-                  className={`input ${fe('fyKey')}`}
-                  value={fyKey ?? ''}
-                  onChange={(e) => { setFyKey(parseInt(e.target.value, 10)); clearFe('fyKey'); }}
-                >
-                  {(fyList as any[]).map((f: any) => (
-                    <option key={f.fy_key} value={f.fy_key}>{f.fy_label}</option>
-                  ))}
-                </select>
+                {isEdit ? (
+                  <div className="input bg-gray-50 text-gray-700">
+                    {(fyList as any[]).find((f: any) => f.fy_key === fyKey)?.fy_label ?? '—'}
+                  </div>
+                ) : (
+                  <select
+                    className={`input ${fe('fyKey')}`}
+                    value={fyKey ?? ''}
+                    onChange={(e) => { setFyKey(parseInt(e.target.value, 10)); clearFe('fyKey'); }}
+                  >
+                    {(fyList as any[]).map((f: any) => (
+                      <option key={f.fy_key} value={f.fy_key}>{f.fy_label}</option>
+                    ))}
+                  </select>
+                )}
               </Field>
-              <Field label="Revised?">
-                <select className="input" value={isRevised ? 'yes' : 'no'} onChange={(e) => setIsRevised(e.target.value === 'yes')}>
-                  <option value="no">No</option>
-                  <option value="yes">Yes</option>
-                </select>
-              </Field>
+              {!isEdit && (
+                <Field label="Revised?">
+                  <select className="input" value={isRevised ? 'yes' : 'no'} onChange={(e) => setIsRevised(e.target.value === 'yes')}>
+                    <option value="no">No</option>
+                    <option value="yes">Yes</option>
+                  </select>
+                </Field>
+              )}
               <Field label="PI Number">
                 <div className="input bg-gray-50 text-gray-700">
-                  {piData?.piNumber
-                    ? <>{piData.piNumber}{isRevised && <span className="text-orange-600 font-bold">R</span>}</>
-                    : <span className="text-gray-400 animate-pulse">Generating…</span>}
+                  {isEdit
+                    ? (existingOrder as any)?.pi_number
+                    : piData?.piNumber
+                      ? <>{piData.piNumber}{isRevised && <span className="text-orange-600 font-bold">R</span>}</>
+                      : <span className="text-gray-400 animate-pulse">Generating…</span>}
                 </div>
               </Field>
               <Field label="Order Date">
@@ -351,7 +475,12 @@ export default function NewOrder() {
               <Field label="Buyer PO Date">
                 <input type="date" className="input" value={buyerOrderDate} onChange={(e) => setBuyerOrderDate(e.target.value)} />
               </Field>
-              <Field label="Upload PO Copy" className="col-span-2">
+              <Field label={isEdit ? 'Replace PO Copy' : 'Upload PO Copy'} className="col-span-2">
+                {isEdit && (existingOrder as any)?.po_copy_url && !poCopyFile && (
+                  <p className="text-xs text-gray-500 mb-1">
+                    Current: <a href={(existingOrder as any).po_copy_url} target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">view file</a> — choose a file below to replace it.
+                  </p>
+                )}
                 <input
                   type="file"
                   accept=".pdf,.jpg,.jpeg,.png"
@@ -433,8 +562,17 @@ export default function NewOrder() {
                       </div>
                     )}
 
-                    {selectedConsigneeRecordId && selectedConsigneeRecordId !== '__new__' && (
+                    {/* Editing a draft whose consignee doesn't match any saved
+                        record (or wasn't matched yet) still needs these fields
+                        visible — the loaded name/address/GSTIN otherwise have
+                        nowhere to show up or be corrected. */}
+                    {((selectedConsigneeRecordId && selectedConsigneeRecordId !== '__new__') || (isEdit && consigneeName)) && (
                       <div className="grid grid-cols-2 gap-4">
+                        {isEdit && !selectedConsigneeRecordId && (
+                          <Field label="Consignee Name" className="col-span-2">
+                            <input className="input" value={consigneeName} onChange={(e) => setConsigneeName(e.target.value)} />
+                          </Field>
+                        )}
                         <Field label="GSTIN">
                           <input className="input" value={consigneeGstin} onChange={(e) => setConsigneeGstin(e.target.value)} />
                         </Field>
@@ -553,18 +691,18 @@ export default function NewOrder() {
             <button
               type="button"
               onClick={() => handleSubmit('draft')}
-              disabled={createOrder.isPending}
+              disabled={saving}
               className="px-5 py-2 border border-gray-300 rounded text-sm font-medium hover:bg-gray-50 disabled:opacity-50"
             >
-              Save Draft
+              {saving ? 'Saving…' : 'Save Draft'}
             </button>
             <button
               type="button"
               onClick={() => handleSubmit('sent')}
-              disabled={createOrder.isPending}
+              disabled={saving}
               className="px-5 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
             >
-              {createOrder.isPending ? 'Saving…' : 'Submit for Approval'}
+              {saving ? 'Saving…' : 'Submit for Approval'}
             </button>
           </div>
         </div>

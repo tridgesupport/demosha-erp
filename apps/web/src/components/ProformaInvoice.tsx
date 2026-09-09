@@ -119,7 +119,7 @@ export default function ProformaInvoice({ order: o, approverName, approverSignat
         </thead>
         <tbody>
           {(o.lines ?? []).map((l: any, i: number) => (
-            <tr key={l.line_id ?? i}>
+            <tr key={l.line_id ?? i} style={{ height: 22 }}>
               <td style={{ border: '1px solid black', padding: '3px 4px', textAlign: 'center' }}>{l.line_number}</td>
               <td style={{ border: '1px solid black', padding: '3px 4px' }}>
                 {l.full_description}
@@ -131,9 +131,11 @@ export default function ProformaInvoice({ order: o, approverName, approverSignat
               <td style={{ border: '1px solid black', padding: '3px 4px', textAlign: 'right' }}>{formatINR(l.line_amount)}</td>
             </tr>
           ))}
-          {/* Blank rows to fill space */}
-          {Array.from({ length: Math.max(0, 5 - (o.lines ?? []).length) }).map((_, i) => (
-            <tr key={`blank-${i}`}>
+          {/* Blank filler rows — a legacy paper PI has one big printed table
+              regardless of how many items are on it; a handful of real rows
+              shouldn't leave the rest of the page looking half-empty. */}
+          {Array.from({ length: Math.max(0, 14 - (o.lines ?? []).length) }).map((_, i) => (
+            <tr key={`blank-${i}`} style={{ height: 22 }}>
               <td style={{ border: '1px solid black', padding: '3px 4px' }}>&nbsp;</td>
               <td style={{ border: '1px solid black', padding: '3px 4px' }}>&nbsp;</td>
               <td style={{ border: '1px solid black', padding: '3px 4px' }}>&nbsp;</td>
@@ -145,33 +147,28 @@ export default function ProformaInvoice({ order: o, approverName, approverSignat
         </tbody>
       </table>
 
-      {/* Totals */}
+      {/* Tot Qty / Gross Value — full-width row directly under the items table */}
+      <table width="100%" style={{ borderCollapse: 'collapse', border: '1px solid black', marginBottom: 4 }}>
+        <tbody>
+          <tr>
+            <td style={{ width: '50%', border: '1px solid black', padding: '3px 5px' }}>
+              <strong>TOT QTY (KGS):</strong> {totalQty.toLocaleString('en-IN')} KGS ({totalPkgs} PKGS)
+            </td>
+            <td style={{ width: '50%', border: '1px solid black', padding: '3px 5px', textAlign: 'right' }}>
+              <strong>GROSS VALUE ₹:</strong> {formatINR(o.gross_value)}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
+      {/* Insurance / Freight / GST / Total breakdown */}
       <table width="100%" style={{ borderCollapse: 'collapse', marginBottom: 4 }}>
         <tbody>
           <tr>
-            <td style={{ width: '55%', verticalAlign: 'top', paddingRight: 8 }}>
-              {/* Schedule */}
-              {o.schedule_notes && (
-                <div style={{ border: '1px solid black', padding: '4px 6px', marginBottom: 4 }}>
-                  <strong>SCHEDULE:</strong> {o.schedule_notes}
-                </div>
-              )}
-
-              {/* Bank Details */}
-              <div style={{ border: '1px solid black', padding: '4px 6px', fontSize: 10 }}>
-                <p style={{ margin: 0 }}><strong>GSTIN NO.:</strong> 24AAACD3822A1ZH &nbsp;|&nbsp; <strong>PAN NO.:</strong> AAACD3822A</p>
-                <p style={{ margin: '3px 0 0' }}><strong>Account Name:</strong> DEMOSHA CHEMICALS PVT LTD</p>
-                <p style={{ margin: '1px 0 0' }}><strong>Bank:</strong> BANK OF BARODA &nbsp;|&nbsp; <strong>Branch:</strong> Nariman Point, Mumbai</p>
-                <p style={{ margin: '1px 0 0' }}><strong>Account No.:</strong> 12920500000026 &nbsp;|&nbsp; <strong>Type:</strong> Cash Credit</p>
-                <p style={{ margin: '1px 0 0' }}><strong>IFSC:</strong> BARB0NARIMA</p>
-              </div>
-            </td>
-
-            <td style={{ width: '45%', verticalAlign: 'top' }}>
+            <td style={{ width: '35%' }} />
+            <td style={{ width: '65%', verticalAlign: 'top' }}>
               <table width="100%" style={{ borderCollapse: 'collapse', border: '1px solid black' }}>
                 <tbody>
-                  <TotalLine label="TOT QTY (KGS):" value={`${totalQty.toLocaleString('en-IN')} KGS (${totalPkgs} PKGS)`} />
-                  <TotalLine label="GROSS VALUE ₹:" value={formatINR(o.gross_value)} />
                   <TotalLine label={`INSURANCE (${o.insurance_pct}%):`} value={formatINR(o.insurance_amount)} />
                   <TotalLine label={`FREIGHT ₹/KG (${o.freight_per_kg ?? 0}) ${o.freight_desc ?? ''}:`} value={formatINR(o.freight_amount)} />
                   <TotalLine label="ASSESSABLE VALUE:" value={formatINR(o.assessable_value)} bold />
@@ -191,12 +188,27 @@ export default function ProformaInvoice({ order: o, approverName, approverSignat
         </tbody>
       </table>
 
-      {/* Signature */}
-      <table width="100%" style={{ borderCollapse: 'collapse', marginTop: 8 }}>
+      {/* Schedule — full width, same as the legacy paper PI */}
+      {o.schedule_notes && (
+        <div style={{ border: '1px solid black', padding: '5px 7px', marginBottom: 4 }}>
+          <strong>SCHEDULE:</strong> {o.schedule_notes}
+        </div>
+      )}
+
+      {/* Bank Details + Signature */}
+      <table width="100%" style={{ borderCollapse: 'collapse', marginTop: 4 }}>
         <tbody>
           <tr>
-            <td style={{ width: '60%' }} />
-            <td style={{ width: '40%', border: '1px solid black', padding: '6px 8px', textAlign: 'center' }}>
+            <td style={{ width: '60%', verticalAlign: 'top', paddingRight: 8 }}>
+              <div style={{ border: '1px solid black', padding: '4px 6px', fontSize: 10 }}>
+                <p style={{ margin: 0 }}><strong>GSTIN NO.:</strong> 24AAACD3822A1ZH &nbsp;|&nbsp; <strong>PAN NO.:</strong> AAACD3822A</p>
+                <p style={{ margin: '3px 0 0' }}><strong>Account Name:</strong> DEMOSHA CHEMICALS PVT LTD</p>
+                <p style={{ margin: '1px 0 0' }}><strong>Bank:</strong> BANK OF BARODA &nbsp;|&nbsp; <strong>Branch:</strong> Nariman Point, Mumbai</p>
+                <p style={{ margin: '1px 0 0' }}><strong>Account No.:</strong> 12920500000026 &nbsp;|&nbsp; <strong>Type:</strong> Cash Credit</p>
+                <p style={{ margin: '1px 0 0' }}><strong>IFSC:</strong> BARB0NARIMA</p>
+              </div>
+            </td>
+            <td style={{ width: '40%', border: '1px solid black', padding: '6px 8px', textAlign: 'center', verticalAlign: 'top' }}>
               <p style={{ margin: 0 }}>For <strong>DEMOSHA CHEMICALS PVT LTD</strong></p>
               <div style={{ height: 48, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                 {resolvedApproverSig && (

@@ -1,6 +1,6 @@
 import { useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { useOrder, useUpdateOrderStatus, useReviseOrder, useSplitOrder } from '@/hooks/useOrders';
+import { useOrder, useUpdateOrderStatus, useReviseOrder, useSplitOrder, useDeleteOrder } from '@/hooks/useOrders';
 import { formatINR } from '@/lib/calculations';
 import StatusBadge from '@/components/StatusBadge';
 import OverdueBadge from '@/components/OverdueBadge';
@@ -11,7 +11,7 @@ import { uploadSalesBill, uploadLr, uploadOrderApprovalAttachment } from '@/lib/
 import { useQueryClient } from '@tanstack/react-query';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
-import { ArrowLeft, CheckCircle, Printer, Upload, FileText, ExternalLink, AlertTriangle, Paperclip, Layers } from 'lucide-react';
+import { ArrowLeft, CheckCircle, Printer, Upload, FileText, ExternalLink, AlertTriangle, Paperclip, Layers, Pencil, Trash2 } from 'lucide-react';
 
 const STATUS_FLOW = ['draft', 'sent', 'approved', 'sent_to_factory', 'invoiced', 'dispatched'];
 
@@ -30,6 +30,8 @@ export default function OrderDetail() {
   const updateStatus = useUpdateOrderStatus(id!);
   const revise = useReviseOrder(id!);
   const splitOrder = useSplitOrder(id!);
+  const deleteOrder = useDeleteOrder();
+  const [deleting, setDeleting] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const [fulfillQty, setFulfillQty] = useState<Record<string, { qty_kg: number; num_packages: number }>>({});
   const [uploading, setUploading] = useState<string | null>(null);
@@ -55,7 +57,24 @@ export default function OrderDetail() {
 
   const generatePdf = async (el: HTMLDivElement): Promise<Blob> => {
     el.style.display = 'block';
-    const canvas = await html2canvas(el, { scale: 2, useCORS: true, allowTaint: false, logging: false });
+    // `el` is just a positioning wrapper — the actual fixed-size A4 page is
+    // its one child (ProformaInvoice's own root div, 210mm wide, centered
+    // via margin:auto). Without an explicit width/height, html2canvas sizes
+    // its canvas off *el's* own layout width — however wide its containing
+    // block happens to be, easily 1000px+ on a wide screen — instead of the
+    // narrower centered page inside it. That squashes the real content into
+    // a fraction of an oversized, mostly-blank canvas, which jsPDF then
+    // stretches to fill the PDF page: tiny print with a big blank margin.
+    // Capturing the child directly, pinned to its own real pixel size, is
+    // what keeps the output at genuine full-page A4 size.
+    const target = (el.firstElementChild as HTMLElement) ?? el;
+    await new Promise<void>(r => requestAnimationFrame(() => r()));
+    const rect = target.getBoundingClientRect();
+    const canvas = await html2canvas(target, {
+      scale: 2, useCORS: true, allowTaint: false, logging: false,
+      width: rect.width, height: rect.height,
+      windowWidth: rect.width, windowHeight: rect.height,
+    });
     el.style.display = 'none';
     const pdf = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
     const imgData = canvas.toDataURL('image/jpeg', 0.92);
@@ -267,6 +286,19 @@ export default function OrderDetail() {
     await updateStatus.mutateAsync({ status: 'cancelled' });
   };
 
+  const handleDeleteDraft = async () => {
+    if (!confirm(`Permanently delete draft ${o.pi_number}? This cannot be undone.`)) return;
+    setDeleting(true);
+    try {
+      await deleteOrder.mutateAsync(id!);
+      navigate('/orders');
+    } catch (err: any) {
+      alert(err?.message || 'Failed to delete draft');
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   const handleSelfApprove = async () => {
     if (!selfApproveComment.trim()) return;
     setSubmittingSelfApproval(true);
@@ -364,6 +396,12 @@ export default function OrderDetail() {
             )}
           </div>
           <div className="flex flex-wrap gap-2 justify-end">
+            {o.status === 'draft' && (
+              <Link to={`/orders/${id}/edit`}
+                className="flex items-center gap-1.5 px-4 py-1.5 border border-blue-300 text-blue-700 rounded text-sm hover:bg-blue-50">
+                <Pencil className="w-4 h-4" /> Edit Draft
+              </Link>
+            )}
             <button onClick={handlePrint} disabled={generatingProforma} className="flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50">
               <Printer className="w-4 h-4" /> {generatingProforma ? 'Generating…' : 'Print Pro Forma'}
             </button>
@@ -415,6 +453,12 @@ export default function OrderDetail() {
             {canCancel && (
               <button onClick={handleCancel} className="px-4 py-1.5 border border-red-300 text-red-600 rounded text-sm hover:bg-red-50">
                 Cancel PI
+              </button>
+            )}
+            {o.status === 'draft' && (
+              <button onClick={handleDeleteDraft} disabled={deleting}
+                className="flex items-center gap-1.5 px-4 py-1.5 border border-red-300 text-red-600 rounded text-sm hover:bg-red-50 disabled:opacity-50">
+                <Trash2 className="w-4 h-4" /> {deleting ? 'Deleting…' : 'Delete Draft'}
               </button>
             )}
           </div>

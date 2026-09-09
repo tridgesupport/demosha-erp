@@ -255,8 +255,15 @@ router.get('/:id', async (req: Request, res: Response) => {
         SELECT
           l.*,
           COALESCE(l.full_description, cs.pro_forma_product, v.full_description) AS full_description,
+          cs.item, cs.pkg, cs.legacy_code,
           COALESCE(cs.grade, v.grade) AS grade,
-          COALESCE(cs.qty, v.qty_per_pkg) AS qty_per_pkg,
+          -- Prefer the catalogue's own per-package quantity; for a line with no
+          -- SKU/variant match (a one-off free-text item) fall back to deriving
+          -- it from what was actually saved (qty_kg / num_packages) so the PI
+          -- edit screen reconstructs the same package count instead of losing
+          -- it — sales_order_lines itself has no qty_per_pkg column to read.
+          COALESCE(cs.qty, v.qty_per_pkg,
+            CASE WHEN l.num_packages > 0 THEN l.qty_kg / l.num_packages END) AS qty_per_pkg,
           p.product_name, p.hs_code,
           pt.pkg_name
         FROM sales_order_lines l
@@ -289,6 +296,10 @@ router.get('/:id', async (req: Request, res: Response) => {
   }
 });
 
+// Editing is only for a PI that hasn't gone anywhere yet — once it's been
+// submitted/approved/etc. the numbers on it are what downstream steps (and
+// anyone who's already seen it) rely on, so this refuses anything past draft
+// rather than silently rewriting a PI someone else is already acting on.
 router.put('/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   const {
@@ -338,10 +349,14 @@ router.put('/:id', async (req: Request, res: Response) => {
         total_amount       = ${total_amount ?? 0},
         schedule_notes     = ${schedule_notes ?? null},
         updated_at         = NOW()
-      WHERE order_id = ${id} AND deleted_at IS NULL
+      WHERE order_id = ${id} AND deleted_at IS NULL AND status = 'draft'
       RETURNING *
     `;
-    if (orderRows.length === 0) return res.status(404).json({ error: 'Order not found' });
+    if (orderRows.length === 0) {
+      const exists = await sql`SELECT status FROM sales_orders WHERE order_id = ${id} AND deleted_at IS NULL`;
+      if (exists.length === 0) return res.status(404).json({ error: 'Order not found' });
+      return res.status(400).json({ error: `Only a draft can be edited (this PI is ${exists[0].status})` });
+    }
 
     await sql`DELETE FROM sales_order_lines WHERE order_id = ${id}`;
     for (let i = 0; i < lines.length; i++) {
@@ -360,6 +375,30 @@ router.put('/:id', async (req: Request, res: Response) => {
   } catch (err: any) {
     console.error(err);
     res.status(500).json({ error: err?.message || 'Failed to update order' });
+  }
+});
+
+// A draft that was never actually meant to go anywhere (a mis-click, a test
+// entry) — soft-deleted the same way every other "delete" in this app works,
+// and restricted to draft so nothing that's already been submitted/approved
+// (and might have paperwork or a counterparty relying on it) can disappear.
+router.delete('/:id', requireAuth, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const rows = await sql`
+      UPDATE sales_orders SET deleted_at = NOW(), updated_at = NOW()
+      WHERE order_id = ${id} AND deleted_at IS NULL AND status = 'draft'
+      RETURNING order_id
+    `;
+    if (rows.length === 0) {
+      const exists = await sql`SELECT status FROM sales_orders WHERE order_id = ${id} AND deleted_at IS NULL`;
+      if (exists.length === 0) return res.status(404).json({ error: 'Order not found' });
+      return res.status(400).json({ error: `Only a draft can be deleted (this PI is ${exists[0].status})` });
+    }
+    res.status(204).end();
+  } catch (err: any) {
+    console.error(err);
+    res.status(500).json({ error: err?.message || 'Failed to delete order' });
   }
 });
 

@@ -54,6 +54,8 @@ async function request<T = any>(path: string, options?: RequestInit): Promise<T>
     // rendered as a bare bullet with no text in the UI. `||` catches that too.
     throw new Error(err.error || 'Request failed');
   }
+  // A 204 (e.g. DELETE) has no body — res.json() on that throws.
+  if (res.status === 204) return undefined as T;
   return res.json();
 }
 
@@ -73,6 +75,9 @@ export const createOrder = (body: unknown) =>
 
 export const updateOrder = (id: string, body: unknown) =>
   request(`/api/orders/${id}`, { method: 'PUT', body: JSON.stringify(body) });
+
+export const deleteOrder = (id: string) =>
+  request(`/api/orders/${id}`, { method: 'DELETE' });
 
 export const updateOrderStatus = (id: string, status: string, comment?: string) =>
   request(`/api/orders/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status, comment }) });

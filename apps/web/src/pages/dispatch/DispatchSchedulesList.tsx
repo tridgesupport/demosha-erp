@@ -1,13 +1,15 @@
-import { useMemo, useRef, useState } from 'react';
+import { Fragment, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { format } from 'date-fns';
-import { Download, AlertTriangle } from 'lucide-react';
+import { Download, AlertTriangle, ChevronDown, ChevronRight } from 'lucide-react';
 import { useDispatchSchedule, useUpdateDispatchScheduleOrder } from '@/hooks/useDispatchSchedules';
+import { fetchDispatchScheduleSplits } from '@/lib/api';
 import { formatINR } from '@/lib/calculations';
 import { useAuth } from '@/context/AuthContext';
 import DispatchSchedulePdf from '@/components/DispatchSchedulePdf';
+import DispatchScheduleSplitPanel from '@/components/DispatchScheduleSplitPanel';
 
 export default function DispatchSchedulesList() {
   const { user } = useAuth();
@@ -17,6 +19,16 @@ export default function DispatchSchedulesList() {
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const [exportRows, setExportRows] = useState<any[]>([]);
+
+  const toggleExpanded = (id: string) => {
+    setExpanded(prev => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
+  };
 
   const orders: any[] = data?.data ?? [];
 
@@ -45,9 +57,32 @@ export default function DispatchSchedulesList() {
   };
 
   const generatePdf = async () => {
-    if (!pdfRef.current || selectedOrders.length === 0) return;
+    if (selectedOrders.length === 0) return;
     setGeneratingPdf(true);
     try {
+      // Orders that were split in this tab export one row per split
+      // (labeled D1, D2, ...) instead of the order's own single row, so
+      // the printed schedule reflects the planned batches.
+      const rows: any[] = [];
+      for (const o of selectedOrders) {
+        if (o.split_count > 0) {
+          const { splits } = await fetchDispatchScheduleSplits(o.order_id);
+          for (const s of splits) {
+            rows.push({
+              ...o,
+              dispatch_tentative_date: s.tentative_date,
+              dispatch_remark: `(${o.pi_number}-D${s.split_number}) ${s.remark ?? ''}`.trim(),
+            });
+          }
+        } else {
+          rows.push(o);
+        }
+      }
+      setExportRows(rows);
+      // Give the hidden PDF target a moment to re-render with exportRows
+      // before html2canvas snapshots it.
+      await new Promise(r => setTimeout(r, 50));
+      if (!pdfRef.current) return;
       pdfRef.current.style.display = 'block';
       const canvas = await html2canvas(pdfRef.current, { scale: 2, useCORS: true, allowTaint: false, logging: false });
       pdfRef.current.style.display = 'none';
@@ -128,6 +163,7 @@ export default function DispatchSchedulesList() {
                   <th className="px-4 py-3 w-8">
                     <input type="checkbox" className="rounded" checked={orders.length > 0 && selected.size === orders.length} onChange={toggleAll} />
                   </th>
+                  <th className="px-1 py-3 w-6"></th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-700">PI No.</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-700">Buyer PO No.</th>
                   <th className="text-left px-4 py-3 font-semibold text-gray-700">Customer</th>
@@ -140,38 +176,57 @@ export default function DispatchSchedulesList() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {orders.map((o: any) => (
-                  <tr key={o.order_id} className={selected.has(o.order_id) ? 'bg-blue-50' : 'hover:bg-gray-50'}>
-                    <td className="px-4 py-3">
-                      <input type="checkbox" className="rounded" checked={selected.has(o.order_id)} onChange={() => toggle(o.order_id)} />
-                    </td>
-                    <td className="px-4 py-3">
-                      <Link to={`/orders/${o.order_id}`} className="text-blue-600 font-medium hover:underline">
-                        {o.pi_number}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-3 text-gray-700">{o.buyer_po_number ?? '—'}</td>
-                    <td className="px-4 py-3 text-gray-700">{o.buyer_name}</td>
-                    <td className="px-4 py-3 text-gray-500 max-w-xs truncate" title={o.packing_description}>{o.packing_description ?? '—'}</td>
-                    <td className="px-4 py-3 text-right text-gray-700">{o.total_qty_kg != null ? Number(o.total_qty_kg).toLocaleString('en-IN') : '—'}</td>
-                    <td className="px-4 py-3 text-right text-gray-700">{formatINR(o.total_amount)}</td>
-                    <td className="px-4 py-1">
-                      <input
-                        type="date"
-                        className="border border-gray-300 rounded px-2 py-1 text-sm w-36"
-                        defaultValue={o.dispatch_tentative_date ? String(o.dispatch_tentative_date).slice(0, 10) : ''}
-                        onBlur={e => saveField(o.order_id, 'dispatch_tentative_date', e.target.value)}
-                      />
-                    </td>
-                    <td className="px-4 py-1">
-                      <input
-                        type="text"
-                        className="border border-gray-300 rounded px-2 py-1 text-sm w-48"
-                        placeholder="Remark"
-                        defaultValue={o.dispatch_remark ?? ''}
-                        onBlur={e => saveField(o.order_id, 'dispatch_remark', e.target.value)}
-                      />
-                    </td>
-                  </tr>
+                  <Fragment key={o.order_id}>
+                    <tr className={selected.has(o.order_id) ? 'bg-blue-50' : 'hover:bg-gray-50'}>
+                      <td className="px-4 py-3">
+                        <input type="checkbox" className="rounded" checked={selected.has(o.order_id)} onChange={() => toggle(o.order_id)} />
+                      </td>
+                      <td className="px-1 py-3">
+                        <button onClick={() => toggleExpanded(o.order_id)} className="text-gray-400 hover:text-gray-700" title="Splits">
+                          {expanded.has(o.order_id) ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+                        </button>
+                      </td>
+                      <td className="px-4 py-3">
+                        <Link to={`/orders/${o.order_id}`} className="text-blue-600 font-medium hover:underline">
+                          {o.pi_number}
+                        </Link>
+                        {o.split_count > 0 && (
+                          <span className="ml-1.5 text-xs bg-purple-50 text-purple-700 border border-purple-200 rounded-full px-1.5 py-0.5">
+                            {o.split_count} split{o.split_count !== 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 text-gray-700">{o.buyer_po_number ?? '—'}</td>
+                      <td className="px-4 py-3 text-gray-700">{o.buyer_name}</td>
+                      <td className="px-4 py-3 text-gray-500 max-w-xs truncate" title={o.packing_description}>{o.packing_description ?? '—'}</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{o.total_qty_kg != null ? Number(o.total_qty_kg).toLocaleString('en-IN') : '—'}</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{formatINR(o.total_amount)}</td>
+                      <td className="px-4 py-1">
+                        <input
+                          type="date"
+                          className="border border-gray-300 rounded px-2 py-1 text-sm w-36"
+                          defaultValue={o.dispatch_tentative_date ? String(o.dispatch_tentative_date).slice(0, 10) : ''}
+                          onBlur={e => saveField(o.order_id, 'dispatch_tentative_date', e.target.value)}
+                        />
+                      </td>
+                      <td className="px-4 py-1">
+                        <input
+                          type="text"
+                          className="border border-gray-300 rounded px-2 py-1 text-sm w-48"
+                          placeholder="Remark"
+                          defaultValue={o.dispatch_remark ?? ''}
+                          onBlur={e => saveField(o.order_id, 'dispatch_remark', e.target.value)}
+                        />
+                      </td>
+                    </tr>
+                    {expanded.has(o.order_id) && (
+                      <tr>
+                        <td colSpan={10} className="p-0">
+                          <DispatchScheduleSplitPanel orderId={o.order_id} piNumber={o.pi_number} />
+                        </td>
+                      </tr>
+                    )}
+                  </Fragment>
                 ))}
               </tbody>
             </table>
@@ -182,7 +237,7 @@ export default function DispatchSchedulesList() {
       {/* Hidden PDF render target */}
       <div ref={pdfRef} style={{ display: 'none', position: 'fixed', top: 0, left: 0, zIndex: -1 }}>
         <DispatchSchedulePdf
-          orders={selectedOrders}
+          orders={exportRows}
           generatedOn={format(new Date(), 'yyyy-MM-dd')}
           approverName={user?.name}
           approverSignatureUrl={user?.signature_url}

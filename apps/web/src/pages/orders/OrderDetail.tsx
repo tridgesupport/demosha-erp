@@ -7,7 +7,7 @@ import OverdueBadge from '@/components/OverdueBadge';
 import ProformaInvoice from '@/components/ProformaInvoice';
 import { useCustomerOutstanding } from '@/hooks/useCustomers';
 import { useAuth } from '@/context/AuthContext';
-import { uploadSalesBill, uploadLr, uploadOrderApprovalAttachment } from '@/lib/api';
+import { uploadSalesBill, uploadLr, uploadOrderApprovalAttachment, updateOrderInvoiceNumber } from '@/lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -40,6 +40,7 @@ export default function OrderDetail() {
   const [confirming, setConfirming] = useState(false);
   const [fulfillQty, setFulfillQty] = useState<Record<string, { qty_kg: number; num_packages: number }>>({});
   const [uploading, setUploading] = useState<string | null>(null);
+  const [savingInvoiceNumber, setSavingInvoiceNumber] = useState(false);
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [generatingProforma, setGeneratingProforma] = useState(false);
   const [approvalSigUrl, setApprovalSigUrl] = useState<string | null>(null);
@@ -51,6 +52,7 @@ export default function OrderDetail() {
   const buyerOutstanding = useCustomerOutstanding(order?.buyer_id);
   const printRef = useRef<HTMLDivElement>(null);
   const approvalRef = useRef<HTMLDivElement>(null);
+  const invoiceNumberRef = useRef<HTMLInputElement>(null);
 
   const blobToDataUrl = (blob: Blob): Promise<string> =>
     new Promise((resolve, reject) => {
@@ -211,6 +213,16 @@ export default function OrderDetail() {
     }
   };
 
+  const handleSaveInvoiceNumber = async () => {
+    setSavingInvoiceNumber(true);
+    try {
+      await updateOrderInvoiceNumber(id!, invoiceNumberRef.current?.value ?? '');
+      queryClient.invalidateQueries({ queryKey: ['order', id] });
+    } finally {
+      setSavingInvoiceNumber(false);
+    }
+  };
+
   if (isLoading) return <div className="animate-pulse h-64 bg-gray-200 rounded-lg" />;
   if (!order) return <div className="text-center py-16 text-gray-400">Order not found</div>;
 
@@ -234,12 +246,6 @@ export default function OrderDetail() {
   };
 
   const nextAction = getNextAction();
-  // The sales bill is mandatory paperwork before dispatch (enforced by the
-  // API too). This no longer blocks opening the quantity editor below or
-  // creating a split — only the final Confirm submission is held back, so
-  // sales can still line up how much is being dispatched while the bill is
-  // still being chased down.
-  const dispatchNeedsSalesBill = nextAction?.next === 'dispatched' && !o.sales_bill_url;
   // Dispatch is the one stage that can be done partially — clicking the
   // button opens a per-line quantity editor instead of firing the
   // whole-order transition straight away (see the fulfillment panel below).
@@ -274,7 +280,7 @@ export default function OrderDetail() {
   };
 
   const handleFulfillConfirm = async () => {
-    if (!nextAction || dispatchNeedsSalesBill) return;
+    if (!nextAction) return;
     const lines = (o.lines ?? []).map((l: any) => ({
       line_id: l.line_id,
       qty_kg: fulfillQty[l.line_id]?.qty_kg ?? Number(l.qty_kg),
@@ -394,11 +400,6 @@ export default function OrderDetail() {
                 Superseded by <Link to={`/orders/${o.child_order_id}`} className="underline">{o.child_pi_number}</Link>
               </p>
             )}
-            {dispatchNeedsSalesBill && (
-              <p className="text-xs text-orange-500 mt-1">
-                Upload the sales bill (below) before this order can be marked dispatched.
-              </p>
-            )}
             {o.parts && o.parts.length > 0 && (
               <div className="flex items-center gap-2 mt-1 flex-wrap">
                 <Layers className="w-3.5 h-3.5 text-purple-500" />
@@ -436,13 +437,30 @@ export default function OrderDetail() {
                   onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} />
               </label>
             )}
-            {o.status === 'dispatched' && (
+            {/* Stays available any time after dispatch, not just in the moment —
+                dispatched_at never clears once set. */}
+            {o.dispatched_at && (
               <label className={`flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 cursor-pointer ${uploading === 'lr' ? 'opacity-50' : ''}`}>
                 <Upload className="w-4 h-4" />
                 {o.lr_url ? 'Replace LR' : 'Upload LR'}
                 <input type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png"
                   onChange={(e) => e.target.files?.[0] && handleUploadLr(e.target.files[0])} />
               </label>
+            )}
+            {['approved', 'sent_to_factory', 'invoiced', 'dispatched'].includes(o.status) && (
+              <div className="flex items-center gap-1.5">
+                <input
+                  ref={invoiceNumberRef}
+                  type="text"
+                  defaultValue={o.invoice_number ?? ''}
+                  placeholder="Invoice number"
+                  className="w-32 px-2 py-1.5 border border-gray-300 rounded text-sm"
+                />
+                <button onClick={handleSaveInvoiceNumber} disabled={savingInvoiceNumber}
+                  className="px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50">
+                  {savingInvoiceNumber ? 'Saving…' : 'Save Invoice #'}
+                </button>
+              </div>
             )}
             {nextAction && o.status !== 'cancelled' && !(isFulfillAction && confirming) && (
               <button
@@ -490,11 +508,6 @@ export default function OrderDetail() {
               off into a new part (same PI number, next letter) that stays visible to both sales and factory.
               Pkgs Now scales with quantity automatically — adjust it by hand if packaging doesn't split evenly.
             </p>
-            {dispatchNeedsSalesBill && (
-              <p className="text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded px-2 py-1 mb-3">
-                You can set up the split below, but upload the sales bill (above) before this can be confirmed as dispatched.
-              </p>
-            )}
             <table className="w-full text-sm mb-3">
               <thead>
                 <tr className="text-xs text-blue-800 uppercase">
@@ -541,8 +554,7 @@ export default function OrderDetail() {
               </tbody>
             </table>
             <div className="flex gap-2">
-              <button onClick={handleFulfillConfirm} disabled={splitOrder.isPending || dispatchNeedsSalesBill}
-                title={dispatchNeedsSalesBill ? 'Upload the sales bill before marking this order dispatched' : undefined}
+              <button onClick={handleFulfillConfirm} disabled={splitOrder.isPending}
                 className="px-4 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50">
                 {splitOrder.isPending ? 'Saving…' : `Confirm: ${nextAction!.label}`}
               </button>

@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { format } from 'date-fns';
-import { Download } from 'lucide-react';
+import { Download, AlertTriangle } from 'lucide-react';
 import { useDispatchSchedule, useUpdateDispatchScheduleOrder } from '@/hooks/useDispatchSchedules';
 import { formatINR } from '@/lib/calculations';
 import { useAuth } from '@/context/AuthContext';
@@ -11,11 +11,12 @@ import DispatchSchedulePdf from '@/components/DispatchSchedulePdf';
 
 export default function DispatchSchedulesList() {
   const { user } = useAuth();
-  const { data, isLoading } = useDispatchSchedule();
+  const { data, isLoading, isError, error, refetch, isRefetching } = useDispatchSchedule();
   const updateOrder = useUpdateDispatchScheduleOrder();
   const pdfRef = useRef<HTMLDivElement>(null);
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   const orders: any[] = data?.data ?? [];
 
@@ -37,7 +38,10 @@ export default function DispatchSchedulesList() {
   );
 
   const saveField = (orderId: string, field: 'dispatch_tentative_date' | 'dispatch_remark', value: string) => {
-    updateOrder.mutate({ orderId, body: { [field]: value || null } });
+    setSaveError(null);
+    updateOrder.mutate({ orderId, body: { [field]: value || null } }, {
+      onError: (err: any) => setSaveError(err?.message ?? 'Failed to save'),
+    });
   };
 
   const generatePdf = async () => {
@@ -88,9 +92,32 @@ export default function DispatchSchedulesList() {
         </button>
       </div>
 
+      {isError && (
+        <div className="flex items-start justify-between gap-3 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            <span>Couldn't load the dispatch schedule: {(error as any)?.message ?? 'Unknown error'}</span>
+          </div>
+          <button
+            onClick={() => refetch()}
+            disabled={isRefetching}
+            className="shrink-0 px-3 py-1 border border-red-300 rounded text-red-700 hover:bg-red-100 disabled:opacity-50"
+          >
+            {isRefetching ? 'Retrying…' : 'Retry'}
+          </button>
+        </div>
+      )}
+
+      {saveError && (
+        <div className="flex items-center gap-2 bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">
+          <AlertTriangle className="w-4 h-4 shrink-0" />
+          <span>Couldn't save: {saveError}</span>
+        </div>
+      )}
+
       {isLoading ? (
         <div className="text-gray-400 text-sm py-10 text-center">Loading…</div>
-      ) : orders.length === 0 ? (
+      ) : isError ? null : orders.length === 0 ? (
         <div className="text-gray-400 text-sm py-10 text-center">No orders Sent to Factory right now.</div>
       ) : (
         <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">

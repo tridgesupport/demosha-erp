@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import sql from '../db/client';
-import { requireAuth, requireRole } from '../middleware/auth';
+import { requireAuth } from '../middleware/auth';
 
 const router = Router();
 
@@ -571,7 +571,7 @@ const MATERIALIZED_VIEWS = [
   'v_inventory_period_balance',
 ] as const;
 
-router.post('/refresh', requireAuth, requireRole('admin', 'manager'), async (_req: Request, res: Response) => {
+router.post('/refresh', requireAuth, async (_req: Request, res: Response) => {
   const started = Date.now();
   // Each view is independent (different materialized view, no shared lock),
   // so refresh them concurrently across the connection pool rather than one

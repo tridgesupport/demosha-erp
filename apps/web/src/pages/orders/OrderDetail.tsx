@@ -7,13 +7,18 @@ import OverdueBadge from '@/components/OverdueBadge';
 import ProformaInvoice from '@/components/ProformaInvoice';
 import { useCustomerOutstanding } from '@/hooks/useCustomers';
 import { useAuth } from '@/context/AuthContext';
-import { uploadSalesBill, uploadLr, uploadOrderApprovalAttachment } from '@/lib/api';
+import { uploadSalesBill, uploadLr } from '@/lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { ArrowLeft, CheckCircle, Printer, Upload, FileText, ExternalLink, AlertTriangle, Paperclip, Layers, Pencil, Trash2 } from 'lucide-react';
 
-const STATUS_FLOW = ['draft', 'sent', 'approved', 'sent_to_factory', 'invoiced', 'dispatched'];
+// "Invoiced" was a distinct stage before it got folded into dispatch — it's
+// deliberately left out of the visible flow now (nothing new lands there),
+// but a handful of old orders are still parked at that status; the timeline
+// below treats them as equivalent to "Sent to Factory" rather than adding
+// invoiced back in as its own box.
+const STATUS_FLOW = ['draft', 'sent', 'approved', 'sent_to_factory', 'dispatched'];
 
 const STATUS_LABELS: Record<string, string> = {
   draft: 'Draft', sent: 'Sent for Approval', approved: 'Approved',
@@ -38,10 +43,6 @@ export default function OrderDetail() {
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [generatingProforma, setGeneratingProforma] = useState(false);
   const [approvalSigUrl, setApprovalSigUrl] = useState<string | null>(null);
-  const [selfApproving, setSelfApproving] = useState(false);
-  const [selfApproveComment, setSelfApproveComment] = useState('');
-  const [selfApproveFile, setSelfApproveFile] = useState<File | null>(null);
-  const [submittingSelfApproval, setSubmittingSelfApproval] = useState(false);
 
   const buyerOutstanding = useCustomerOutstanding(order?.buyer_id);
   const printRef = useRef<HTMLDivElement>(null);
@@ -210,24 +211,21 @@ export default function OrderDetail() {
   if (!order) return <div className="text-center py-16 text-gray-400">Order not found</div>;
 
   const o = order as any;
-  const isManagerOrAdmin = user?.role === 'manager' || user?.role === 'admin';
-  const isSalesperson = user?.role === 'salesperson';
-  const isFactory = user?.role === 'factory';
-  // Invoicing/dispatch used to be factory-only; opened up to every sales-tab
-  // role (same relaxation as Dispatch Schedules) so sales/management can move
-  // a PI along when factory isn't the one at the keyboard.
-  const canFulfill = isManagerOrAdmin || isSalesperson || isFactory;
 
-  // Role-based next action. The "invoiced" stage has been folded into
-  // dispatch — sent_to_factory now goes straight to Mark Dispatched. Orders
-  // already sitting at 'invoiced' from before this change aren't backfilled,
-  // so that status is still handled here (same next step, same label) rather
-  // than left with no way forward.
+  // No per-role gating within a tab — reaching this page at all already
+  // means the Sales tab was granted to this user's role; every action here
+  // is available to anyone who got that far, regardless of which specific
+  // role they hold.
   const getNextAction = () => {
     if (o.status === 'draft') return { label: 'Submit for Approval', next: 'sent' };
-    if (o.status === 'sent' && isManagerOrAdmin) return { label: 'Mark Approved', next: 'approved' };
-    if (o.status === 'approved' && isSalesperson) return { label: 'Sent to Factory', next: 'sent_to_factory' };
-    if (['sent_to_factory', 'invoiced'].includes(o.status) && canFulfill) return { label: 'Mark Dispatched', next: 'dispatched' };
+    if (o.status === 'sent') return { label: 'Mark Approved', next: 'approved' };
+    if (o.status === 'approved') return { label: 'Sent to Factory', next: 'sent_to_factory' };
+    // The "invoiced" stage has been folded into dispatch — sent_to_factory
+    // now goes straight to Mark Dispatched. Orders already sitting at
+    // 'invoiced' from before that change aren't backfilled, so that status
+    // is still handled here (same next step, same label) rather than left
+    // with no way forward.
+    if (['sent_to_factory', 'invoiced'].includes(o.status)) return { label: 'Mark Dispatched', next: 'dispatched' };
     return null;
   };
 
@@ -238,19 +236,15 @@ export default function OrderDetail() {
   // sales can still line up how much is being dispatched while the bill is
   // still being chased down.
   const dispatchNeedsSalesBill = nextAction?.next === 'dispatched' && !o.sales_bill_url;
-  // Dispatch is the one stage a factory/sales user can do partially —
-  // clicking the button opens a per-line quantity editor instead of firing
-  // the whole-order transition straight away (see the fulfillment panel below).
+  // Dispatch is the one stage that can be done partially — clicking the
+  // button opens a per-line quantity editor instead of firing the
+  // whole-order transition straight away (see the fulfillment panel below).
   const isFulfillAction = nextAction != null && nextAction.next === 'dispatched';
   // A leftover part (created by a previous partial invoice/dispatch) sits at
   // sent_to_factory with nothing left to approve — it can still be revised
   // (re-quoted at a new price) or cancelled outright, same as a fresh PI.
   const canRevise = ['dispatched', 'invoiced', 'cancelled', 'sent_to_factory'].includes(o.status);
   const canCancel = ['draft', 'sent', 'approved', 'sent_to_factory'].includes(o.status);
-  // Management isn't always around to approve — anyone else with access to this
-  // PI (i.e. the salesperson who raised it) can approve it themselves instead,
-  // as long as they leave a comment explaining why.
-  const canSelfApprove = o.status === 'sent' && !isManagerOrAdmin;
 
   const handleStatusChange = async () => {
     if (!nextAction) return;
@@ -306,24 +300,6 @@ export default function OrderDetail() {
       alert(err?.message || 'Failed to delete draft');
     } finally {
       setDeleting(false);
-    }
-  };
-
-  const handleSelfApprove = async () => {
-    if (!selfApproveComment.trim()) return;
-    setSubmittingSelfApproval(true);
-    try {
-      await generateAndUploadApprovedPdf();
-      await updateStatus.mutateAsync({ status: 'approved', comment: selfApproveComment.trim() });
-      if (selfApproveFile) {
-        await uploadOrderApprovalAttachment(id!, selfApproveFile);
-        queryClient.invalidateQueries({ queryKey: ['order', id] });
-      }
-      setSelfApproving(false);
-      setSelfApproveComment('');
-      setSelfApproveFile(null);
-    } finally {
-      setSubmittingSelfApproval(false);
     }
   };
 
@@ -434,7 +410,7 @@ export default function OrderDetail() {
                   onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} />
               </label>
             )}
-            {canFulfill && o.status === 'dispatched' && (
+            {o.status === 'dispatched' && (
               <label className={`flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 cursor-pointer ${uploading === 'lr' ? 'opacity-50' : ''}`}>
                 <Upload className="w-4 h-4" />
                 {o.lr_url ? 'Replace LR' : 'Upload LR'}
@@ -449,14 +425,6 @@ export default function OrderDetail() {
                 className="px-4 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
               >
                 {generatingPdf ? 'Generating PDF…' : updateStatus.isPending ? 'Saving…' : confirming ? `Confirm: ${nextAction.label}` : nextAction.label}
-              </button>
-            )}
-            {canSelfApprove && (
-              <button
-                onClick={() => setSelfApproving(true)}
-                className="flex items-center gap-1.5 px-4 py-1.5 border border-amber-400 text-amber-700 rounded text-sm hover:bg-amber-50"
-              >
-                <AlertTriangle className="w-4 h-4" /> Self-Approve
               </button>
             )}
             {canRevise && (
@@ -555,7 +523,7 @@ export default function OrderDetail() {
         {/* Status timeline */}
         <div className="mt-6 flex items-center gap-1 flex-wrap">
           {STATUS_FLOW.map((s, i) => {
-            const idx = STATUS_FLOW.indexOf(o.status);
+            const idx = STATUS_FLOW.indexOf(o.status === 'invoiced' ? 'sent_to_factory' : o.status);
             const done = i < idx;
             const active = i === idx;
             return (
@@ -722,50 +690,6 @@ export default function OrderDetail() {
           )}
         </div>
       </div>
-
-      {/* Self-approve modal */}
-      {selfApproving && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl p-6 w-96 space-y-4">
-            <div className="flex items-center gap-2 text-amber-700">
-              <AlertTriangle className="w-5 h-5" />
-              <h3 className="font-semibold">Self-Approve {o.pi_number}</h3>
-            </div>
-            <p className="text-xs text-gray-500">
-              Use this only when management isn't available to approve. Your comment will stay
-              visible to everyone who opens this PI afterwards.
-            </p>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Comment (required)</label>
-              <textarea
-                value={selfApproveComment}
-                onChange={(e) => setSelfApproveComment(e.target.value)}
-                placeholder="Why are you self-approving this PI?"
-                rows={3}
-                className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Attach evidence — picture or file (optional)</label>
-              <input type="file" accept=".pdf,.jpg,.jpeg,.png"
-                onChange={(e) => setSelfApproveFile(e.target.files?.[0] ?? null)}
-                className="text-xs w-full" />
-              {selfApproveFile && <p className="text-xs text-gray-500 mt-1">{selfApproveFile.name}</p>}
-            </div>
-            <div className="flex gap-3">
-              <button onClick={handleSelfApprove} disabled={!selfApproveComment.trim() || submittingSelfApproval}
-                className="flex-1 px-4 py-2 bg-amber-600 text-white rounded text-sm hover:bg-amber-700 disabled:opacity-50">
-                {submittingSelfApproval ? 'Submitting…' : 'Confirm Self-Approval'}
-              </button>
-              <button onClick={() => { setSelfApproving(false); setSelfApproveComment(''); setSelfApproveFile(null); }}
-                disabled={submittingSelfApproval}
-                className="flex-1 px-4 py-2 border rounded text-sm hover:bg-gray-50 disabled:opacity-50">
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Hidden print content */}
       <div ref={printRef} style={{ display: 'none' }}>

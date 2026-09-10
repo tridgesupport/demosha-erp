@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
-import { requireAuth, requireRole } from '../middleware/auth';
+import { requireAuth } from '../middleware/auth';
 import sql from '../db/client';
 import { uploadToImagekit } from '../lib/imagekit';
 
@@ -239,16 +239,6 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
   const isReceived            = status === 'received';
   const isCancelled           = status === 'cancelled';
 
-  // A manager/admin approving goes through as usual. Anyone else approving is
-  // "self-approval" — for when management isn't around to sign off — and must
-  // leave a comment explaining why, so the reason stays visible to everyone
-  // downstream (vendor dispatch, GRN, etc.) who opens this PO afterwards.
-  const isManagerOrAdmin = ['admin', 'manager'].includes(req.user?.role?.toLowerCase() ?? '');
-  const isSelfApproval = isApproval && !isManagerOrAdmin;
-  if (isSelfApproval && !String(comment ?? '').trim()) {
-    return res.status(400).json({ error: 'A comment is required to self-approve' });
-  }
-
   try {
     const rows = await sql`
       UPDATE purchase_orders SET
@@ -259,7 +249,9 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
         submitted_at        = CASE WHEN ${isSubmission}    THEN NOW()        ELSE submitted_at END,
         approved_by         = CASE WHEN ${isApproval}      THEN ${userEmail} ELSE approved_by END,
         approved_at         = CASE WHEN ${isApproval}      THEN NOW()        ELSE approved_at END,
-        is_self_approved    = CASE WHEN ${isApproval}      THEN ${isSelfApproval} ELSE is_self_approved END,
+        -- "Self-approved" just records whether the approver is the same
+        -- person who submitted it — informational only now, not a gate.
+        is_self_approved    = CASE WHEN ${isApproval}      THEN (submitted_by = ${userEmail}) ELSE is_self_approved END,
         approval_comment    = CASE WHEN ${isApproval}      THEN ${String(comment ?? '').trim() || null} ELSE approval_comment END,
         sent_to_vendor_at   = CASE WHEN ${isSentToVendor}  THEN NOW()        ELSE sent_to_vendor_at END,
         sent_to_vendor_by   = CASE WHEN ${isSentToVendor}  THEN ${userEmail} ELSE sent_to_vendor_by END,
@@ -298,7 +290,7 @@ router.post('/:id/upload-po-pdf', requireAuth, upload.single('file') as any, asy
   } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }
 });
 
-router.post('/:id/upload-approved-po', requireAuth, requireRole('admin', 'manager'), upload.single('file') as any, async (req: Request, res: Response) => {
+router.post('/:id/upload-approved-po', requireAuth, upload.single('file') as any, async (req: Request, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {
     const prefix = await poFilePrefix(req.params.id);

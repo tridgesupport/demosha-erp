@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
-import { requireAuth, requireRole } from '../middleware/auth';
+import { requireAuth } from '../middleware/auth';
 import sql from '../db/client';
 import { uploadToImagekit } from '../lib/imagekit';
 
@@ -206,11 +206,6 @@ router.patch('/logsheets/:id/status', requireAuth, async (req: Request, res: Res
   const VALID = ['submitted', 'approved'];
   if (!VALID.includes(status)) return res.status(400).json({ error: 'Invalid status' });
 
-  const role = req.user?.role?.toLowerCase() ?? '';
-  if (status === 'approved' && !['admin', 'manager', 'plant_incharge'].includes(role)) {
-    return res.status(403).json({ error: 'Only Plant Incharge, Manager or Admin can approve' });
-  }
-
   const userEmail   = req.user?.email ?? null;
   const isSubmit    = status === 'submitted';
   const isApproval  = status === 'approved';
@@ -257,7 +252,6 @@ router.post('/logsheets/:id/upload-pdf', requireAuth, upload.single('file') as a
 // ─── Bulk approve ─────────────────────────────────────────────────────────────
 
 router.post('/logsheets/bulk-approve', requireAuth,
-  requireRole('admin', 'manager', 'plant_incharge'),
   async (req: Request, res: Response) => {
     const { ids } = req.body as { ids: string[] };
     if (!Array.isArray(ids) || ids.length === 0) return res.status(400).json({ error: 'ids array required' });

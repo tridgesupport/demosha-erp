@@ -5,7 +5,6 @@ import { ChevronDown, ChevronRight, CheckCircle, Clock, Download, ExternalLink, 
 import html2canvas from 'html2canvas';
 import jsPDF from 'jspdf';
 import { useLogsheet, useUpdateLogsheetSection, useUpdateLogsheetStatus } from '@/hooks/useProduction';
-import { useAuth } from '@/context/AuthContext';
 import { getProductConfig, SectionConfig, FormField } from '@/lib/productionFormConfigs';
 import { uploadLogsheetPdf } from '@/lib/api';
 import LogsheetPdf from '@/components/LogsheetPdf';
@@ -139,7 +138,6 @@ function SectionCard({
 export default function LogsheetDetail() {
   const { productCode = '', id = '' } = useParams<{ productCode: string; id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
   const qc = useQueryClient();
   const pdfRef = useRef<HTMLDivElement>(null);
   const [generatingPdf, setGeneratingPdf] = useState(false);
@@ -152,9 +150,6 @@ export default function LogsheetDetail() {
   const saveSection = useUpdateLogsheetSection(id);
   const updateStatus = useUpdateLogsheetStatus(id);
 
-  const role = user?.role?.toLowerCase() ?? '';
-  const canApprove = ['admin', 'manager', 'plant_incharge'].includes(role);
-
   const status = logsheet?.status ?? 'draft';
   const readOnly = status === 'approved';
   const sectionData: Record<string, any> = logsheet?.section_data ?? {};
@@ -163,7 +158,7 @@ export default function LogsheetDetail() {
   const allFilled   = config ? filledCount === config.sections.length : false;
 
   const canSubmit  = status === 'draft' && allFilled;
-  const canApproveSingle = status === 'submitted' && canApprove;
+  const canApproveSingle = status === 'submitted';
 
   async function handleSaveSection(sectionKey: string, data: Record<string, unknown>) {
     setSavingSection(sectionKey);

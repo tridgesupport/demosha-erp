@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { requireAuth, requireRole } from '../middleware/auth';
+import { requireAuth } from '../middleware/auth';
 import sql from '../db/client';
 
 const router = Router();
@@ -32,8 +32,9 @@ router.get('/', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// Set the tentative date / remark for one order — any sales-tab role.
-router.patch('/:orderId', requireAuth, requireRole('admin', 'manager', 'salesperson', 'factory'), async (req: Request, res: Response) => {
+// Set the tentative date / remark for one order — anyone who can reach the
+// Sales tab (access is gated by tab, not by the specific role within it).
+router.patch('/:orderId', requireAuth, async (req: Request, res: Response) => {
   const { dispatch_tentative_date, dispatch_remark } = req.body;
   try {
     const [order] = await sql`

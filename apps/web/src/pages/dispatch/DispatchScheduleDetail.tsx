@@ -14,6 +14,13 @@ function fmt(d: string | null | undefined): string {
   return String(d).slice(0, 10).split('-').reverse().join('/');
 }
 
+function fmtDateTime(d: string | null | undefined): string {
+  if (!d) return '—';
+  const date = new Date(d);
+  if (Number.isNaN(date.getTime())) return '—';
+  return `${date.toLocaleDateString('en-IN')} ${date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
 export default function DispatchScheduleDetail() {
   const { id } = useParams<{ id: string }>();
   const { user } = useAuth();
@@ -25,7 +32,8 @@ export default function DispatchScheduleDetail() {
   const [lineEdits, setLineEdits] = useState<Record<string, any>>({});
   const [lineError, setLineError] = useState<string | null>(null);
 
-  const isFactory = user?.role === 'factory';
+  // Any role that can reach this page (gated by sales-tab access) can edit
+  // lines — not just factory.
 
   const handleLineEdit = (lineId: string, field: string, value: string) => {
     setLineEdits(prev => ({
@@ -105,7 +113,7 @@ export default function DispatchScheduleDetail() {
             <h1 className="text-xl font-bold text-gray-900">{schedule.schedule_ref}</h1>
             <p className="text-sm text-gray-500 mt-0.5">
               {fmt(schedule.date_from)}{schedule.date_from !== schedule.date_to ? ` → ${fmt(schedule.date_to)}` : ''}
-              {' · '}Created by {schedule.created_by}
+              {' · '}Created by {schedule.created_by} on {fmtDateTime(schedule.created_at)}
             </p>
           </div>
         </div>
@@ -155,7 +163,7 @@ export default function DispatchScheduleDetail() {
               <th className="text-left px-4 py-3 font-semibold text-gray-700">Comments</th>
               <th className="text-center px-4 py-3 font-semibold text-gray-700">Tentative Date</th>
               <th className="text-center px-4 py-3 font-semibold text-gray-700">Dispatched Date</th>
-              {isFactory && <th className="px-4 py-3 w-20"></th>}
+              <th className="px-4 py-3 w-20"></th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-100">
@@ -201,34 +209,32 @@ export default function DispatchScheduleDetail() {
                       <span className="text-gray-400">—</span>
                     )}
                   </td>
-                  {isFactory && (
-                    <td className="px-4 py-3 text-right">
-                      {isEditing ? (
-                        <div className="flex gap-1 justify-end">
-                          <button
-                            onClick={() => saveLineEdit(line.line_id)}
-                            disabled={updateLine.isPending}
-                            className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-50"
-                          >
-                            Save
-                          </button>
-                          <button
-                            onClick={() => setEditingLine(null)}
-                            className="px-2 py-1 text-gray-600 border border-gray-300 text-xs rounded hover:bg-gray-50"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      ) : (
+                  <td className="px-4 py-3 text-right">
+                    {isEditing ? (
+                      <div className="flex gap-1 justify-end">
                         <button
-                          onClick={() => setEditingLine(line.line_id)}
-                          className="text-xs text-gray-500 hover:text-blue-600 font-medium"
+                          onClick={() => saveLineEdit(line.line_id)}
+                          disabled={updateLine.isPending}
+                          className="px-2 py-1 bg-blue-600 text-white text-xs rounded hover:bg-blue-700 disabled:opacity-50"
                         >
-                          Edit
+                          Save
                         </button>
-                      )}
-                    </td>
-                  )}
+                        <button
+                          onClick={() => setEditingLine(null)}
+                          className="px-2 py-1 text-gray-600 border border-gray-300 text-xs rounded hover:bg-gray-50"
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        onClick={() => setEditingLine(line.line_id)}
+                        className="text-xs text-gray-500 hover:text-blue-600 font-medium"
+                      >
+                        Edit
+                      </button>
+                    )}
+                  </td>
                 </tr>
               );
             })}

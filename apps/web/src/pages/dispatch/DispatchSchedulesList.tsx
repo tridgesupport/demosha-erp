@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useDispatchSchedules, useDeleteDispatchSchedule } from '@/hooks/useDispatchSchedules';
-import { useAuth } from '@/context/AuthContext';
 import { Plus, FileText, Trash2 } from 'lucide-react';
 
 function fmt(d: string | null | undefined): string {
@@ -9,13 +8,20 @@ function fmt(d: string | null | undefined): string {
   return String(d).slice(0, 10).split('-').reverse().join('/');
 }
 
+function fmtDateTime(d: string | null | undefined): string {
+  if (!d) return '—';
+  const date = new Date(d);
+  if (Number.isNaN(date.getTime())) return '—';
+  return `${date.toLocaleDateString('en-IN')} ${date.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' })}`;
+}
+
 export default function DispatchSchedulesList() {
-  const { user } = useAuth();
   const navigate = useNavigate();
   const [page, setPage] = useState(1);
   const { data, isLoading } = useDispatchSchedules(page);
   const deleteSchedule = useDeleteDispatchSchedule();
-  const isFactory = user?.role === 'factory';
+  // Any role that can reach this page (gated by sales-tab access) can create
+  // and delete schedules — not just factory.
 
   const handleDelete = async (id: string, ref: string) => {
     if (!confirm(`Delete schedule ${ref}?`)) return;
@@ -31,15 +37,13 @@ export default function DispatchSchedulesList() {
             {data?.total ?? 0} schedule{(data?.total ?? 0) !== 1 ? 's' : ''}
           </p>
         </div>
-        {isFactory && (
-          <button
-            onClick={() => navigate('/dispatch/schedules/new')}
-            className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
-          >
-            <Plus className="w-4 h-4" />
-            New Schedule
-          </button>
-        )}
+        <button
+          onClick={() => navigate('/dispatch/schedules/new')}
+          className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+        >
+          <Plus className="w-4 h-4" />
+          New Schedule
+        </button>
       </div>
 
       {isLoading ? (
@@ -57,6 +61,7 @@ export default function DispatchSchedulesList() {
                 <th className="text-left px-4 py-3 font-semibold text-gray-700">Product / Description</th>
                 <th className="text-center px-4 py-3 font-semibold text-gray-700">Lines</th>
                 <th className="text-left px-4 py-3 font-semibold text-gray-700">Created By</th>
+                <th className="text-left px-4 py-3 font-semibold text-gray-700">Created At</th>
                 <th className="text-right px-4 py-3 font-semibold text-gray-700">Actions</th>
               </tr>
             </thead>
@@ -73,6 +78,7 @@ export default function DispatchSchedulesList() {
                   <td className="px-4 py-3 text-gray-500 max-w-xs truncate">{s.product_description ?? '—'}</td>
                   <td className="px-4 py-3 text-center text-gray-700">{s.line_count}</td>
                   <td className="px-4 py-3 text-gray-500">{s.created_by}</td>
+                  <td className="px-4 py-3 text-gray-500">{fmtDateTime(s.created_at)}</td>
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       {s.pdf_url && (
@@ -80,15 +86,13 @@ export default function DispatchSchedulesList() {
                           <FileText className="w-4 h-4" />
                         </a>
                       )}
-                      {isFactory && (
-                        <button
-                          onClick={() => handleDelete(s.schedule_id, s.schedule_ref)}
-                          className="text-gray-400 hover:text-red-600"
-                          title="Delete"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
+                      <button
+                        onClick={() => handleDelete(s.schedule_id, s.schedule_ref)}
+                        className="text-gray-400 hover:text-red-600"
+                        title="Delete"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
                     </div>
                   </td>
                 </tr>

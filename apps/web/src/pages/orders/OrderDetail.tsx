@@ -334,6 +334,11 @@ export default function OrderDetail() {
                 {o.pi_number}{o.part_suffix && <span className="text-purple-600">-{o.part_suffix}</span>}
               </h1>
               <StatusBadge status={o.status} />
+              {o.is_test && (
+                <span className="text-xs bg-amber-100 text-amber-700 px-2 py-0.5 rounded-full font-bold">
+                  TEST
+                </span>
+              )}
               {o.revision_number > 0 && (
                 <span className="text-xs bg-purple-100 text-purple-700 px-2 py-0.5 rounded-full">
                   Rev {o.revision_number}

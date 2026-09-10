@@ -94,8 +94,8 @@ export const splitOrder = (
   lines: Array<{ line_id: string; qty_kg: number; num_packages: number }>
 ) => request(`/api/orders/${id}/split`, { method: 'POST', body: JSON.stringify({ action, lines }) });
 
-export const fetchNextPiNumber = (fyKey: number) =>
-  request<{ piNumber: string; seqNumber: number }>(`/api/pi/next-number?fyKey=${fyKey}`);
+export const fetchNextPiNumber = (fyKey: number, isTest = false) =>
+  request<{ piNumber: string; seqNumber: number }>(`/api/pi/next-number?fyKey=${fyKey}${isTest ? '&isTest=true' : ''}`);
 
 // Customers
 export const fetchCustomers = (filters?: GlobalFilters, search?: string, page = 1, limit = 50) =>
@@ -293,8 +293,8 @@ export const fetchPurchaseIndents = (params?: { fyKey?: number; status?: string[
 export const fetchPurchaseIndent = (id: string) =>
   request(`/api/purchase/indents/${id}`);
 
-export const fetchNextIndentNumber = (fyKey: number) =>
-  request<{ indentNumber: string }>(`/api/purchase/indents/next-number?fyKey=${fyKey}`);
+export const fetchNextIndentNumber = (fyKey: number, isTest = false) =>
+  request<{ indentNumber: string }>(`/api/purchase/indents/next-number?fyKey=${fyKey}${isTest ? '&isTest=true' : ''}`);
 
 export const createPurchaseIndent = (body: unknown) =>
   request('/api/purchase/indents', { method: 'POST', body: JSON.stringify(body) });

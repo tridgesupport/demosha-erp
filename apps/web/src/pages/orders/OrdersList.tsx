@@ -262,6 +262,9 @@ export default function OrdersList() {
                   >
                     <td className="px-4 py-2.5 font-medium text-blue-600">
                       {o.pi_number}{o.part_suffix && <span className="text-purple-600">-{o.part_suffix}</span>}
+                      {o.is_test && (
+                        <span className="ml-2 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700 align-middle">TEST</span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-gray-600">{o.order_date ? String(o.order_date).slice(0, 10) : '—'}</td>
                     <td className="px-4 py-2.5 font-medium text-gray-800">{o.buyer_name}</td>

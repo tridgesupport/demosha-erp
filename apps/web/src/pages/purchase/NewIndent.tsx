@@ -107,12 +107,16 @@ export default function NewIndent() {
   const [lines, setLines] = useState<LineItem[]>([emptyLine()]);
   const [errors, setErrors] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
+  // When checked, the created indent gets a throwaway 'TEST-...' number
+  // instead of consuming the real, permanent per-FY indent counter — lets
+  // someone test the New Indent flow repeatedly without burning real numbers.
+  const [isTest, setIsTest] = useState(false);
 
   useEffect(() => { if (currentFy) setFyKey(currentFy.fy_key); }, [currentFy]);
 
   const { data: numData } = useQuery({
-    queryKey: ['indent-next-number', fyKey],
-    queryFn: () => fetchNextIndentNumber(fyKey!),
+    queryKey: ['indent-next-number', fyKey, isTest],
+    queryFn: () => fetchNextIndentNumber(fyKey!, isTest),
     enabled: fyKey != null,
   });
 
@@ -145,6 +149,7 @@ export default function NewIndent() {
         indent_date: indentDate,
         indent_for: indentFor || null,
         remarks: remarks || null,
+        is_test: isTest,
         lines: lines.map((l) => ({
           item_id: l.item_id || null,
           description: l.description.trim(),
@@ -209,6 +214,20 @@ export default function NewIndent() {
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Indent For (Department)</label>
               <DepartmentSelect value={indentFor} onChange={setIndentFor} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Is this a test?</label>
+              <label className="flex items-center gap-2 h-[30px]">
+                <input
+                  type="checkbox"
+                  className="w-4 h-4 rounded border-gray-300"
+                  checked={isTest}
+                  onChange={(e) => setIsTest(e.target.checked)}
+                />
+                <span className="text-sm text-gray-600">
+                  {isTest ? "Won't use a real indent number" : 'Testing only'}
+                </span>
+              </label>
             </div>
           </div>
           <div>

@@ -7,7 +7,7 @@ import { uploadToImagekit } from '../lib/imagekit';
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const router = Router();
 
-// List schedules — factory, admin, manager
+// List schedules — any sales-tab role
 router.get('/', requireAuth, async (req: Request, res: Response) => {
   const page  = Math.max(1, parseInt(String(req.query.page  ?? '1'), 10));
   const limit = Math.min(200, Math.max(1, parseInt(String(req.query.limit ?? '50'), 10)));
@@ -97,8 +97,8 @@ router.get('/:id', requireAuth, async (req: Request, res: Response) => {
   }
 });
 
-// Create schedule — factory only
-router.post('/', requireAuth, requireRole('factory'), async (req: Request, res: Response) => {
+// Create schedule — any sales-tab role (admin, manager, salesperson, factory)
+router.post('/', requireAuth, requireRole('admin', 'manager', 'salesperson', 'factory'), async (req: Request, res: Response) => {
   const { fy_key, date_from, date_to, product_description, notes, lines } = req.body;
   if (!fy_key || !date_from || !date_to) {
     return res.status(400).json({ error: 'fy_key, date_from, date_to are required' });
@@ -141,8 +141,8 @@ router.post('/', requireAuth, requireRole('factory'), async (req: Request, res: 
   }
 });
 
-// Update schedule header + lines — factory only
-router.put('/:id', requireAuth, requireRole('factory'), async (req: Request, res: Response) => {
+// Update schedule header + lines — any sales-tab role
+router.put('/:id', requireAuth, requireRole('admin', 'manager', 'salesperson', 'factory'), async (req: Request, res: Response) => {
   const { date_from, date_to, product_description, notes, lines } = req.body;
   try {
     await sql`
@@ -177,8 +177,8 @@ router.put('/:id', requireAuth, requireRole('factory'), async (req: Request, res
   }
 });
 
-// Update a single line (e.g. fill dispatched_date) — factory only
-router.patch('/:id/lines/:lineId', requireAuth, requireRole('factory'), async (req: Request, res: Response) => {
+// Update a single line (e.g. fill dispatched_date) — any sales-tab role
+router.patch('/:id/lines/:lineId', requireAuth, requireRole('admin', 'manager', 'salesperson', 'factory'), async (req: Request, res: Response) => {
   const { tentative_date, dispatched_date, comments } = req.body;
   try {
     // Wrapped in a transaction so that if the linked order fails the
@@ -242,8 +242,8 @@ router.patch('/:id/lines/:lineId', requireAuth, requireRole('factory'), async (r
   }
 });
 
-// Upload PDF — factory only
-router.post('/:id/upload-pdf', requireAuth, requireRole('factory'), upload.single('file') as any, async (req: Request, res: Response) => {
+// Upload PDF — any sales-tab role
+router.post('/:id/upload-pdf', requireAuth, requireRole('admin', 'manager', 'salesperson', 'factory'), upload.single('file') as any, async (req: Request, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {
     const [sched] = await sql`SELECT schedule_ref FROM dispatch_schedules WHERE schedule_id = ${req.params.id}`;
@@ -260,8 +260,8 @@ router.post('/:id/upload-pdf', requireAuth, requireRole('factory'), upload.singl
   }
 });
 
-// Soft delete — factory only
-router.delete('/:id', requireAuth, requireRole('factory'), async (req: Request, res: Response) => {
+// Soft delete — any sales-tab role
+router.delete('/:id', requireAuth, requireRole('admin', 'manager', 'salesperson', 'factory'), async (req: Request, res: Response) => {
   try {
     await sql`
       UPDATE dispatch_schedules SET deleted_at = NOW(), updated_at = NOW()

@@ -26,7 +26,7 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
           o.buyer_id,    b.customer_name AS buyer_name,
           o.consignee_id, c.customer_name AS consignee_name,
           o.agent_id,    a.agent_name,
-          o.total_amount, o.is_cancelled, o.revision_number,
+          o.total_amount, o.is_cancelled, o.revision_number, o.is_test,
           o.submitted_at, o.submitted_by, o.approved_at, o.approved_by,
           o.invoiced_at, o.dispatched_at,
           fy.fy_label,
@@ -95,6 +95,11 @@ class PreviewRollback extends Error {
 router.get('/next-number', async (req: Request, res: Response) => {
   const fyKey = parseInt(String(req.query.fyKey), 10);
   if (isNaN(fyKey)) return res.status(400).json({ error: 'fyKey is required' });
+  // Test PIs never touch get_next_pi_number()'s real counter (see POST /
+  // below) — nothing to preview from the DB, so just describe the pattern.
+  if (String(req.query.isTest) === 'true') {
+    return res.json({ piNumber: 'TEST-<assigned on submit>', seqNumber: 0 });
+  }
   try {
     let pi_number: string | undefined;
     try {
@@ -138,7 +143,7 @@ router.post('/upload-po', upload.single('file') as any, async (req: Request, res
 router.post('/', async (req: Request, res: Response) => {
   const {
     fy_key, order_date, buyer_order_date, buyer_po_number, po_copy_url,
-    is_revised,
+    is_revised, is_test,
     buyer_id, buyer_address, buyer_gstin, buyer_state_code,
     consignee_id, consignee_name, consignee_address, consignee_gstin, consignee_state_code,
     agent_id, payment_terms_days, freight_desc, freight_per_kg, insurance_pct,
@@ -157,10 +162,22 @@ router.post('/', async (req: Request, res: Response) => {
     // constraint, etc.) the whole thing — including the counter advance —
     // rolls back instead of quietly burning a PI number on a failed attempt.
     const { order, pi_number } = await sql.begin(async (tx) => {
-      const piRow     = await tx`SELECT get_next_pi_number(${fy_key}::smallint) AS pi_number`;
-      const base_pi   = piRow[0].pi_number;
-      const pi_number = is_revised ? `${base_pi}R` : base_pi;
-      const seq_number = parseInt(String(base_pi).slice(String(fy_key).length), 10) || 0;
+      // A test PI never calls get_next_pi_number() — that counter is
+      // permanent and shared with every real PI, so a test entry gets its
+      // own throwaway 'TEST-<epoch ms>' number and a seq_number drawn from a
+      // dedicated sequence instead, leaving the real counter untouched.
+      let pi_number: string;
+      let seq_number: number;
+      if (is_test) {
+        const testSeqRow = await tx`SELECT nextval('sales_orders_test_seq') AS seq`;
+        pi_number = `TEST-${Date.now()}`;
+        seq_number = Number(testSeqRow[0].seq);
+      } else {
+        const piRow   = await tx`SELECT get_next_pi_number(${fy_key}::smallint) AS pi_number`;
+        const base_pi = piRow[0].pi_number;
+        pi_number = is_revised ? `${base_pi}R` : base_pi;
+        seq_number = parseInt(String(base_pi).slice(String(fy_key).length), 10) || 0;
+      }
 
       const orderRows = await tx`
         INSERT INTO sales_orders (
@@ -171,7 +188,7 @@ router.post('/', async (req: Request, res: Response) => {
           gst_type, igst_rate, cgst_rate, tcs_rate,
           gross_value, insurance_amount, freight_amount, assessable_value,
           igst_amount, cgst_amount, sgst_amount, tcs_amount, total_amount,
-          schedule_notes, status, revision_number, is_cancelled
+          schedule_notes, status, revision_number, is_cancelled, is_test
         ) VALUES (
           ${pi_number}, ${fy_key}, ${seq_number},
           ${order_date ?? null}, ${buyer_order_date ?? null}, ${buyer_po_number ?? null}, ${po_copy_url ?? null},
@@ -188,7 +205,7 @@ router.post('/', async (req: Request, res: Response) => {
           ${assessable_value ?? 0},
           ${igst_amount ?? 0}, ${cgst_amount ?? 0}, ${sgst_amount ?? 0},
           ${tcs_amount ?? 0}, ${total_amount ?? 0},
-          ${schedule_notes ?? null}, ${status}, 0, false
+          ${schedule_notes ?? null}, ${status}, 0, false, ${!!is_test}
         )
         RETURNING *
       `;
@@ -791,9 +808,20 @@ router.post('/:id/revise', async (req: Request, res: Response) => {
     // transaction — a failure partway through rolls back the counter advance
     // too, instead of burning a PI number on a revision that never completed.
     const newOrder = await sql.begin(async (tx) => {
-      const piRow     = await tx`SELECT get_next_pi_number(${original.fy_key}::smallint) AS pi_number`;
-      const pi_number = piRow[0].pi_number;
-      const seq_number = parseInt(String(pi_number).slice(String(original.fy_key).length), 10) || 0;
+      // A revision of a test PI stays a test PI — same reasoning as POST /
+      // above, so it keeps drawing from the throwaway test sequence rather
+      // than suddenly consuming a real PI number on revise.
+      let pi_number: string;
+      let seq_number: number;
+      if (original.is_test) {
+        const testSeqRow = await tx`SELECT nextval('sales_orders_test_seq') AS seq`;
+        pi_number = `TEST-${Date.now()}`;
+        seq_number = Number(testSeqRow[0].seq);
+      } else {
+        const piRow = await tx`SELECT get_next_pi_number(${original.fy_key}::smallint) AS pi_number`;
+        pi_number = piRow[0].pi_number;
+        seq_number = parseInt(String(pi_number).slice(String(original.fy_key).length), 10) || 0;
+      }
       const revision_number = (original.revision_number ?? 0) + 1;
 
       const newRows = await tx`
@@ -805,7 +833,7 @@ router.post('/:id/revise', async (req: Request, res: Response) => {
           gst_type, igst_rate, cgst_rate, tcs_rate,
           gross_value, insurance_amount, freight_amount, assessable_value,
           igst_amount, cgst_amount, sgst_amount, tcs_amount, total_amount,
-          schedule_notes, status, parent_order_id, revision_number, is_cancelled
+          schedule_notes, status, parent_order_id, revision_number, is_cancelled, is_test
         ) VALUES (
           ${pi_number}, ${original.fy_key}, ${seq_number},
           ${original.order_date}, ${original.buyer_order_date}, ${original.buyer_po_number},
@@ -818,7 +846,7 @@ router.post('/:id/revise', async (req: Request, res: Response) => {
           ${original.assessable_value},
           ${original.igst_amount}, ${original.cgst_amount}, ${original.sgst_amount},
           ${original.tcs_amount}, ${original.total_amount},
-          ${original.schedule_notes}, 'draft', ${id}, ${revision_number}, false
+          ${original.schedule_notes}, 'draft', ${id}, ${revision_number}, false, ${!!original.is_test}
         )
         RETURNING *
       `;

@@ -124,6 +124,9 @@ export default function IndentsList() {
                     {row.revision_number > 0 && (
                       <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-xs font-bold bg-yellow-100 text-yellow-800">R{row.revision_number}</span>
                     )}
+                    {row.is_test && (
+                      <span className="ml-1.5 inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-700">TEST</span>
+                    )}
                   </td>
                   <td className="px-4 py-3">{row.indent_date ? String(row.indent_date).slice(0, 10) : '—'}</td>
                   <td className="px-4 py-3">{row.indent_for ?? '—'}</td>

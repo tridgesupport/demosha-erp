@@ -32,6 +32,10 @@ export default function NewOrder() {
 
   const [fyKey, setFyKey] = useState<number | null>(null);
   const [isRevised, setIsRevised] = useState(false);
+  // When checked, the created PI gets a throwaway 'TEST-...' number instead
+  // of consuming the real, permanent per-FY PI counter — lets someone test
+  // the New PI flow repeatedly without burning real PI numbers.
+  const [isTest, setIsTest] = useState(false);
   const [orderDate, setOrderDate] = useState(format(new Date(), 'yyyy-MM-dd'));
   const [buyerId, setBuyerId] = useState(prefillBuyerId ?? '');
   const [poCopyFile, setPoCopyFile] = useState<File | null>(null);
@@ -106,8 +110,8 @@ export default function NewOrder() {
   });
 
   const { data: piData } = useQuery({
-    queryKey: ['pi-next-number', fyKey],
-    queryFn: () => fetchNextPiNumber(fyKey!),
+    queryKey: ['pi-next-number', fyKey, isTest],
+    queryFn: () => fetchNextPiNumber(fyKey!, isTest),
     // A preview-only allocation (see the API route) — pointless (and
     // confusingly wrong, since the real number is already fixed) in edit mode.
     enabled: fyKey != null && !isEdit,
@@ -344,7 +348,7 @@ export default function NewOrder() {
         setValidationErrors([]);
         navigate(`/orders/${editId}`);
       } else {
-        const res = await createOrder.mutateAsync({ ...body, fy_key: fyKey, is_revised: isRevised, status }) as any;
+        const res = await createOrder.mutateAsync({ ...body, fy_key: fyKey, is_revised: isRevised, is_test: isTest, status }) as any;
         setValidationErrors([]);
         navigate(`/orders/${res.order_id}`);
       }
@@ -413,10 +417,25 @@ export default function NewOrder() {
                   {isEdit
                     ? (existingOrder as any)?.pi_number
                     : piData?.piNumber
-                      ? <>{piData.piNumber}{isRevised && <span className="text-orange-600 font-bold">R</span>}</>
+                      ? <>{piData.piNumber}{isRevised && !isTest && <span className="text-orange-600 font-bold">R</span>}</>
                       : <span className="text-gray-400 animate-pulse">Generating…</span>}
                 </div>
               </Field>
+              {!isEdit && (
+                <Field label="Is this a test?">
+                  <label className="flex items-center gap-2 h-[38px]">
+                    <input
+                      type="checkbox"
+                      className="w-4 h-4 rounded border-gray-300"
+                      checked={isTest}
+                      onChange={(e) => setIsTest(e.target.checked)}
+                    />
+                    <span className="text-sm text-gray-600">
+                      {isTest ? "Won't use a real PI number" : 'Testing only'}
+                    </span>
+                  </label>
+                </Field>
+              )}
               <Field label="Order Date">
                 <input type="date" className="input" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} />
               </Field>

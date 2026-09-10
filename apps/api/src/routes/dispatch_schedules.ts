@@ -194,19 +194,17 @@ router.patch('/:id/lines/:lineId', requireAuth, requireRole('admin', 'manager', 
       if (!existing) throw Object.assign(new Error('Line not found'), { status: 404 });
 
       // Auto-update the linked order to dispatched — same rules as the
-      // Orders page (PATCH /orders/:id/status): must already be invoiced,
-      // with a sales bill uploaded. Previously this jumped straight from
-      // sent_to_factory to dispatched, skipping the invoiced stage and the
-      // sales-bill check entirely — fixed here to match, and checked before
-      // the line itself is touched.
+      // Orders page (PATCH /orders/:id/status): must be at sent_to_factory
+      // (or the legacy 'invoiced' stage, for orders that reached it before
+      // that stage was folded into dispatch), with a sales bill uploaded.
       if (dispatched_date && existing.order_id) {
         const [ord] = await sql`
           SELECT status, sales_bill_url FROM sales_orders
           WHERE order_id = ${existing.order_id} AND deleted_at IS NULL FOR UPDATE
         `;
         if (ord) {
-          if (ord.status !== 'invoiced') {
-            throw Object.assign(new Error(`Mark this order Invoiced (in Orders) before dispatching it from here — currently ${ord.status}`), { status: 400 });
+          if (!['sent_to_factory', 'invoiced'].includes(ord.status)) {
+            throw Object.assign(new Error(`This order must be Sent to Factory (in Orders) before dispatching it from here — currently ${ord.status}`), { status: 400 });
           }
           if (!ord.sales_bill_url) {
             throw Object.assign(new Error('Upload the sales bill (in Orders) before marking this order dispatched'), { status: 400 });
@@ -217,7 +215,7 @@ router.patch('/:id/lines/:lineId', requireAuth, requireRole('admin', 'manager', 
               dispatched_at = ${dispatched_date}::date,
               updated_at    = NOW()
             WHERE order_id = ${existing.order_id}
-              AND status = 'invoiced'
+              AND status IN ('sent_to_factory', 'invoiced')
               AND deleted_at IS NULL
           `;
         }

@@ -218,24 +218,30 @@ export default function OrderDetail() {
   // a PI along when factory isn't the one at the keyboard.
   const canFulfill = isManagerOrAdmin || isSalesperson || isFactory;
 
-  // Role-based next action
+  // Role-based next action. The "invoiced" stage has been folded into
+  // dispatch — sent_to_factory now goes straight to Mark Dispatched. Orders
+  // already sitting at 'invoiced' from before this change aren't backfilled,
+  // so that status is still handled here (same next step, same label) rather
+  // than left with no way forward.
   const getNextAction = () => {
     if (o.status === 'draft') return { label: 'Submit for Approval', next: 'sent' };
     if (o.status === 'sent' && isManagerOrAdmin) return { label: 'Mark Approved', next: 'approved' };
     if (o.status === 'approved' && isSalesperson) return { label: 'Sent to Factory', next: 'sent_to_factory' };
-    if (o.status === 'sent_to_factory' && canFulfill) return { label: 'Mark Invoiced', next: 'invoiced' };
-    if (o.status === 'invoiced' && canFulfill) return { label: 'Mark Dispatched', next: 'dispatched' };
+    if (['sent_to_factory', 'invoiced'].includes(o.status) && canFulfill) return { label: 'Mark Dispatched', next: 'dispatched' };
     return null;
   };
 
   const nextAction = getNextAction();
   // The sales bill is mandatory paperwork before dispatch (enforced by the
-  // API too — this just stops factory from hitting that rejection blind).
+  // API too). This no longer blocks opening the quantity editor below or
+  // creating a split — only the final Confirm submission is held back, so
+  // sales can still line up how much is being dispatched while the bill is
+  // still being chased down.
   const dispatchNeedsSalesBill = nextAction?.next === 'dispatched' && !o.sales_bill_url;
-  // Invoicing/dispatch are the two stages a factory user can do partially —
+  // Dispatch is the one stage a factory/sales user can do partially —
   // clicking the button opens a per-line quantity editor instead of firing
   // the whole-order transition straight away (see the fulfillment panel below).
-  const isFulfillAction = nextAction != null && ['invoiced', 'dispatched'].includes(nextAction.next);
+  const isFulfillAction = nextAction != null && nextAction.next === 'dispatched';
   // A leftover part (created by a previous partial invoice/dispatch) sits at
   // sent_to_factory with nothing left to approve — it can still be revised
   // (re-quoted at a new price) or cancelled outright, same as a fresh PI.
@@ -266,7 +272,7 @@ export default function OrderDetail() {
   };
 
   const handleFulfillConfirm = async () => {
-    if (!nextAction) return;
+    if (!nextAction || dispatchNeedsSalesBill) return;
     const lines = (o.lines ?? []).map((l: any) => ({
       line_id: l.line_id,
       qty_kg: fulfillQty[l.line_id]?.qty_kg ?? Number(l.qty_kg),
@@ -439,8 +445,7 @@ export default function OrderDetail() {
             {nextAction && o.status !== 'cancelled' && !(isFulfillAction && confirming) && (
               <button
                 onClick={isFulfillAction ? handleStatusChange : confirming ? handleStatusChange : () => setConfirming(true)}
-                disabled={updateStatus.isPending || generatingPdf || dispatchNeedsSalesBill}
-                title={dispatchNeedsSalesBill ? 'Upload the sales bill before marking this order dispatched' : undefined}
+                disabled={updateStatus.isPending || generatingPdf}
                 className="px-4 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
               >
                 {generatingPdf ? 'Generating PDF…' : updateStatus.isPending ? 'Saving…' : confirming ? `Confirm: ${nextAction.label}` : nextAction.label}
@@ -478,11 +483,16 @@ export default function OrderDetail() {
           <div className="mt-4 border border-blue-200 bg-blue-50 rounded-lg p-4">
             <h3 className="font-semibold text-sm text-blue-900 mb-1">{nextAction!.label} — how much now?</h3>
             <p className="text-xs text-blue-700 mb-3">
-              Enter the quantity being {nextAction!.next === 'invoiced' ? 'invoiced' : 'dispatched'} right now.
+              Enter the quantity being dispatched right now.
               Leave a line at its full quantity to action all of it. Reducing a line splits the remainder
               off into a new part (same PI number, next letter) that stays visible to both sales and factory.
               Pkgs Now scales with quantity automatically — adjust it by hand if packaging doesn't split evenly.
             </p>
+            {dispatchNeedsSalesBill && (
+              <p className="text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded px-2 py-1 mb-3">
+                You can set up the split below, but upload the sales bill (above) before this can be confirmed as dispatched.
+              </p>
+            )}
             <table className="w-full text-sm mb-3">
               <thead>
                 <tr className="text-xs text-blue-800 uppercase">
@@ -529,7 +539,8 @@ export default function OrderDetail() {
               </tbody>
             </table>
             <div className="flex gap-2">
-              <button onClick={handleFulfillConfirm} disabled={splitOrder.isPending}
+              <button onClick={handleFulfillConfirm} disabled={splitOrder.isPending || dispatchNeedsSalesBill}
+                title={dispatchNeedsSalesBill ? 'Upload the sales bill before marking this order dispatched' : undefined}
                 className="px-4 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50">
                 {splitOrder.isPending ? 'Saving…' : `Confirm: ${nextAction!.label}`}
               </button>

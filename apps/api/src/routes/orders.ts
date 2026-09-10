@@ -425,8 +425,9 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
   const VALID = ['draft', 'sent', 'approved', 'invoiced', 'dispatched', 'cancelled', 'sent_to_factory'];
   if (!VALID.includes(status)) return res.status(400).json({ error: 'Invalid status' });
 
-  if (['invoiced', 'dispatched'].includes(status) && req.user?.role?.toLowerCase() !== 'factory') {
-    return res.status(403).json({ error: 'Only factory users can mark orders as invoiced or dispatched' });
+  const SALES_TAB_ROLES = ['admin', 'manager', 'salesperson', 'factory'];
+  if (['invoiced', 'dispatched'].includes(status) && !SALES_TAB_ROLES.includes(req.user?.role?.toLowerCase() ?? '')) {
+    return res.status(403).json({ error: 'Only sales-tab roles can mark orders as invoiced or dispatched' });
   }
 
   const userEmail = req.user?.email ?? null;
@@ -500,8 +501,8 @@ router.post('/:id/split', requireAuth, async (req: Request, res: Response) => {
   if (!['invoiced', 'dispatched'].includes(action)) {
     return res.status(400).json({ error: 'action must be "invoiced" or "dispatched"' });
   }
-  if (req.user?.role?.toLowerCase() !== 'factory') {
-    return res.status(403).json({ error: 'Only factory users can mark orders as invoiced or dispatched' });
+  if (!['admin', 'manager', 'salesperson', 'factory'].includes(req.user?.role?.toLowerCase() ?? '')) {
+    return res.status(403).json({ error: 'Only sales-tab roles can mark orders as invoiced or dispatched' });
   }
   if (!Array.isArray(actionedInput) || actionedInput.length === 0) {
     return res.status(400).json({ error: 'lines is required' });
@@ -770,7 +771,8 @@ router.post('/:id/upload-sales-bill', requireAuth, upload.single('file') as any,
   } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }
 });
 
-// Factory uploads the Lorry Receipt once the order is dispatched — sales can view/download it.
+// Any sales-tab role uploads the Lorry Receipt once the order is dispatched (was
+// factory-only on the frontend; the route itself never restricted by role).
 router.post('/:id/upload-lr', requireAuth, upload.single('file') as any, async (req: Request, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {

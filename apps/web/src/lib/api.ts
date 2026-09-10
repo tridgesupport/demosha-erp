@@ -187,6 +187,8 @@ export const uploadLr = (orderId: string, file: File) => {
   const fd = new FormData(); fd.append('file', file);
   return fetch(`${BASE_URL}/api/orders/${orderId}/upload-lr`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
 };
+export const updateOrderInvoiceNumber = (orderId: string, invoice_number: string) =>
+  request(`/api/orders/${orderId}/invoice-number`, { method: 'PATCH', body: JSON.stringify({ invoice_number }) });
 export const uploadOrderApprovalAttachment = (orderId: string, file: File) => {
   const fd = new FormData(); fd.append('file', file);
   return fetch(`${BASE_URL}/api/orders/${orderId}/upload-approval-attachment`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
@@ -203,6 +205,20 @@ export const fetchDispatchSchedule = () =>
 
 export const updateDispatchScheduleOrder = (orderId: string, body: unknown) =>
   request(`/api/dispatch-schedules/${orderId}`, { method: 'PATCH', body: JSON.stringify(body) });
+
+// Dispatch Schedule splits — planning-only, separate from the real
+// invoicing split done from Orders.
+export const fetchDispatchScheduleSplits = (orderId: string) =>
+  request(`/api/dispatch-schedules/${orderId}/splits`);
+
+export const createDispatchScheduleSplit = (orderId: string, body: unknown) =>
+  request(`/api/dispatch-schedules/${orderId}/splits`, { method: 'POST', body: JSON.stringify(body) });
+
+export const updateDispatchScheduleSplit = (orderId: string, splitId: string, body: unknown) =>
+  request(`/api/dispatch-schedules/${orderId}/splits/${splitId}`, { method: 'PATCH', body: JSON.stringify(body) });
+
+export const deleteDispatchScheduleSplit = (orderId: string, splitId: string) =>
+  request(`/api/dispatch-schedules/${orderId}/splits/${splitId}`, { method: 'DELETE' });
 
 // Auth — password & reset flows
 export const updateProfile = (name: string) =>

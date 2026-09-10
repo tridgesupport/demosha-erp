@@ -431,15 +431,8 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
   const isInvoiced = status === 'invoiced';
   const isDispatched = status === 'dispatched';
 
-  // The sales bill is the paperwork dispatch is legally contingent on — don't
-  // let a PI move to dispatched without one already uploaded.
-  if (isDispatched) {
-    const check = await sql`SELECT sales_bill_url FROM sales_orders WHERE order_id = ${id} AND deleted_at IS NULL`;
-    if (check.length === 0) return res.status(404).json({ error: 'Order not found' });
-    if (!check[0].sales_bill_url) {
-      return res.status(400).json({ error: 'Upload the sales bill before marking this order dispatched' });
-    }
-  }
+  // The sales bill is no longer required before dispatch — it's optional
+  // paperwork, uploadable whenever it's ready.
 
   try {
     const rows = await sql`
@@ -503,12 +496,6 @@ router.post('/:id/split', requireAuth, async (req: Request, res: Response) => {
       `;
       if (orderRows.length === 0) throw Object.assign(new Error('Order not found'), { status: 404 });
       const order = orderRows[0] as any;
-
-      // Same rule as the whole-order PATCH /:id/status: no dispatching (full
-      // or partial) without the sales bill already uploaded.
-      if (action === 'dispatched' && !order.sales_bill_url) {
-        throw Object.assign(new Error('Upload the sales bill before marking this order dispatched'), { status: 400 });
-      }
 
       const originalLines = await sql`
         SELECT * FROM sales_order_lines WHERE order_id = ${id} ORDER BY line_number FOR UPDATE
@@ -757,8 +744,28 @@ router.post('/:id/upload-sales-bill', requireAuth, upload.single('file') as any,
   } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }
 });
 
+// Invoice number — a plain reference field, editable any time (not gated to
+// any status). Kept separate from the sales bill upload since neither one
+// is required for the other anymore.
+router.patch('/:id/invoice-number', requireAuth, async (req: Request, res: Response) => {
+  const { invoice_number } = req.body;
+  try {
+    const rows = await sql`
+      UPDATE sales_orders SET invoice_number = ${invoice_number || null}, updated_at = NOW()
+      WHERE order_id = ${req.params.id} AND deleted_at IS NULL
+      RETURNING order_id, invoice_number
+    `;
+    if (!rows.length) return res.status(404).json({ error: 'Order not found' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to save invoice number' });
+  }
+});
+
 // Any sales-tab role uploads the Lorry Receipt once the order is dispatched (was
 // factory-only on the frontend; the route itself never restricted by role).
+// Stays available any time after dispatch — not just in the moment.
 router.post('/:id/upload-lr', requireAuth, upload.single('file') as any, async (req: Request, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {

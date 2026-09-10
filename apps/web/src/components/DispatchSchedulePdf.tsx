@@ -1,23 +1,16 @@
-interface ScheduleLine {
-  line_number: number;
-  po_number?: string | null;
-  po_received_date?: string | null;
-  customer_name?: string | null;
-  comments?: string | null;
-  tentative_date?: string | null;
-  dispatched_date?: string | null;
-}
-
-interface Schedule {
-  schedule_ref: string;
-  date_from: string;
-  date_to: string;
-  product_description?: string | null;
+interface ScheduleOrder {
+  pi_number?: string | null;
+  buyer_po_number?: string | null;
+  buyer_order_date?: string | null;
+  buyer_name?: string | null;
+  packing_description?: string | null;
+  dispatch_tentative_date?: string | null;
+  dispatch_remark?: string | null;
 }
 
 interface Props {
-  schedule: Schedule;
-  lines: ScheduleLine[];
+  orders: ScheduleOrder[];
+  generatedOn: string;
   approverName?: string | null;
   approverSignatureUrl?: string | null;
 }
@@ -27,16 +20,12 @@ function fmt(d: string | null | undefined): string {
   return String(d).slice(0, 10).split('-').reverse().join('/');
 }
 
-export default function DispatchSchedulePdf({ schedule, lines, approverName, approverSignatureUrl }: Props) {
+export default function DispatchSchedulePdf({ orders, generatedOn, approverName, approverSignatureUrl }: Props) {
   const EMPTY_ROWS = 5;
-  const displayLines = lines.length >= EMPTY_ROWS ? lines : [
-    ...lines,
-    ...Array.from({ length: EMPTY_ROWS - lines.length }, (_, i) => ({ line_number: lines.length + i + 1 })),
+  const displayOrders = orders.length >= EMPTY_ROWS ? orders : [
+    ...orders,
+    ...Array.from({ length: EMPTY_ROWS - orders.length }, () => ({} as ScheduleOrder)),
   ];
-
-  const dateLabel = schedule.date_from === schedule.date_to
-    ? fmt(schedule.date_from)
-    : `${fmt(schedule.date_from)} to ${fmt(schedule.date_to)}`;
 
   return (
     <div
@@ -55,13 +44,8 @@ export default function DispatchSchedulePdf({ schedule, lines, approverName, app
               <table style={{ borderCollapse: 'collapse', border: '1px solid black', float: 'right' }}>
                 <tbody>
                   <tr>
-                    <td style={{ border: '1px solid black', padding: '2px 6px', fontWeight: 'bold', fontSize: 10 }}>
-                      {schedule.schedule_ref}
-                    </td>
-                  </tr>
-                  <tr>
                     <td style={{ border: '1px solid black', padding: '2px 6px', fontSize: 10 }}>
-                      {dateLabel}
+                      {fmt(generatedOn)}
                     </td>
                   </tr>
                 </tbody>
@@ -73,7 +57,7 @@ export default function DispatchSchedulePdf({ schedule, lines, approverName, app
 
       {/* Sub-header */}
       <div style={{ textAlign: 'center', fontWeight: 'bold', fontSize: 11, borderTop: '1px solid black', borderBottom: '1px solid black', padding: '4px 0', marginBottom: 8 }}>
-        {schedule.product_description || 'DESPATCH SCHEDULE'}
+        DESPATCH SCHEDULE
       </div>
 
       {/* Table */}
@@ -85,32 +69,32 @@ export default function DispatchSchedulePdf({ schedule, lines, approverName, app
             <th style={{ border: '1px solid black', padding: '4px 5px', width: '10%', textAlign: 'center', fontSize: 10 }}>P.O. Recd. Date</th>
             <th style={{ border: '1px solid black', padding: '4px 5px', width: '36%', textAlign: 'center', fontSize: 10 }}>Name of the Party &amp; Packing</th>
             <th style={{ border: '1px solid black', padding: '4px 5px', width: '18%', textAlign: 'center', fontSize: 10 }}>Tentative Date</th>
-            <th style={{ border: '1px solid black', padding: '4px 5px', width: '18%', textAlign: 'center', fontSize: 10 }}>Despatched ON</th>
+            <th style={{ border: '1px solid black', padding: '4px 5px', width: '18%', textAlign: 'center', fontSize: 10 }}>Remark</th>
           </tr>
         </thead>
         <tbody>
-          {displayLines.map((line, idx) => (
+          {displayOrders.map((o, idx) => (
             <tr key={idx}>
               <td style={{ border: '1px solid black', padding: '6px 4px', textAlign: 'center', fontSize: 10 }}>
-                {(line as any).po_number || (line as any).customer_name ? line.line_number : ''}
+                {o.buyer_po_number || o.buyer_name ? idx + 1 : ''}
               </td>
               <td style={{ border: '1px solid black', padding: '6px 5px', fontSize: 10 }}>
-                {(line as any).po_number ?? ''}
+                {o.buyer_po_number ?? ''}
               </td>
               <td style={{ border: '1px solid black', padding: '6px 5px', textAlign: 'center', fontSize: 10 }}>
-                {fmt((line as any).po_received_date)}
+                {fmt(o.buyer_order_date)}
               </td>
               <td style={{ border: '1px solid black', padding: '6px 5px', fontSize: 10 }}>
-                {(line as any).customer_name && <strong>{(line as any).customer_name}</strong>}
-                {(line as any).comments && (
-                  <p style={{ margin: '2px 0 0', whiteSpace: 'pre-wrap' }}>{(line as any).comments}</p>
+                {o.buyer_name && <strong>{o.buyer_name}</strong>}
+                {o.packing_description && (
+                  <p style={{ margin: '2px 0 0', whiteSpace: 'pre-wrap' }}>{o.packing_description}</p>
                 )}
               </td>
               <td style={{ border: '1px solid black', padding: '6px 5px', textAlign: 'center', fontSize: 10 }}>
-                {fmt((line as any).tentative_date)}
+                {fmt(o.dispatch_tentative_date)}
               </td>
-              <td style={{ border: '1px solid black', padding: '6px 5px', textAlign: 'center', fontSize: 10 }}>
-                {fmt((line as any).dispatched_date)}
+              <td style={{ border: '1px solid black', padding: '6px 5px', fontSize: 10 }}>
+                {o.dispatch_remark ?? ''}
               </td>
             </tr>
           ))}

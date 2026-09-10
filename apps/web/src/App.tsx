@@ -31,8 +31,6 @@ import NewLogsheet from '@/pages/production/NewLogsheet';
 import LogsheetDetail from '@/pages/production/LogsheetDetail';
 import AnalyticalRegister from '@/pages/production/AnalyticalRegister';
 import DispatchSchedulesList from '@/pages/dispatch/DispatchSchedulesList';
-import NewDispatchSchedule from '@/pages/dispatch/NewDispatchSchedule';
-import DispatchScheduleDetail from '@/pages/dispatch/DispatchScheduleDetail';
 import RefreshDataButton from '@/components/analytics/RefreshDataButton';
 
 // Lazy-loaded: the Analytics tab is restricted to admin/manager and most
@@ -73,7 +71,7 @@ export const TAB_CONFIG: Record<string, { label: string; links: { to: string; la
       // Same route/page as management's copy below — sales and factory reach
       // it from here instead of being given the management tab; management
       // keeps its own unchanged entry so nothing moves for that role.
-      { to: '/dispatch/schedules', label: 'Dispatch Schedules' },
+      { to: '/dispatch/schedules', label: 'Dispatch Schedule' },
     ],
   },
   purchase: {
@@ -90,7 +88,7 @@ export const TAB_CONFIG: Record<string, { label: string; links: { to: string; la
   management: {
     label: 'Management',
     links: [
-      { to: '/dispatch/schedules', label: 'Dispatch Schedules' },
+      { to: '/dispatch/schedules', label: 'Dispatch Schedule' },
     ],
   },
   analytics: {
@@ -274,8 +272,7 @@ export default function App() {
     location.pathname === '/purchase/vendors' ||
     location.pathname.startsWith('/production') ||
     location.pathname.startsWith('/analytics') ||
-    location.pathname === '/dispatch/schedules/new' ||
-    location.pathname.startsWith('/dispatch/schedules/');
+    location.pathname === '/dispatch/schedules';
 
   const allowed = getAllowedTabs(user);
   const activeTab = getActiveTab(location.pathname);
@@ -402,8 +399,6 @@ export default function App() {
                 <Route path="/production/:productCode/:id" element={<LogsheetDetail />} />
                 <Route path="/production/:productCode" element={<LogsheetList />} />
                 <Route path="/dispatch/schedules" element={<DispatchSchedulesList />} />
-                <Route path="/dispatch/schedules/new" element={<NewDispatchSchedule />} />
-                <Route path="/dispatch/schedules/:id" element={<DispatchScheduleDetail />} />
                 <Route path="/inventory" element={<ComingSoon label="Inventory" />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>

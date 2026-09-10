@@ -109,6 +109,11 @@ export default function IndentDetail() {
             Rev {indent.revision_number}
           </span>
         )}
+        {indent.is_test && (
+          <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-amber-100 text-amber-700">
+            TEST
+          </span>
+        )}
         <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[indent.status] ?? 'bg-gray-100 text-gray-600'}`}>
           {STEP_LABELS[indent.status] ?? indent.status}
         </span>

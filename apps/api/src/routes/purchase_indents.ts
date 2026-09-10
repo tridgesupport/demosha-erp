@@ -40,7 +40,7 @@ router.get('/', async (req: Request, res: Response) => {
           i.company, i.indent_for, i.status,
           i.submitted_by, i.submitted_at, i.approved_by, i.approved_at,
           i.remarks, i.created_at, i.updated_at,
-          i.revision_number, i.parent_indent_id,
+          i.revision_number, i.parent_indent_id, i.is_test,
           fy.fy_label,
           COUNT(l.line_id)::int AS line_count
         FROM purchase_indents i
@@ -67,12 +67,37 @@ router.get('/', async (req: Request, res: Response) => {
   }
 });
 
+// get_next_indent_number() atomically advances a persistent per-FY counter —
+// meant to be spent exactly once per indent that's actually created (see
+// POST / below). This endpoint only *previews* that number on the New Indent
+// screen before anything is submitted, so — same fix as the PI equivalent in
+// orders.ts's GET /next-number — it must call the real function inside a
+// transaction and always roll that back, rather than calling it directly
+// (which previously burned a real indent number on every form load/FY
+// change, with nothing ever created to match it).
+class PreviewRollback extends Error {
+  constructor(public indentNumber: string) { super('preview-rollback'); }
+}
 router.get('/next-number', async (req: Request, res: Response) => {
   const fyKey = parseInt(String(req.query.fyKey), 10);
   if (isNaN(fyKey)) return res.status(400).json({ error: 'fyKey is required' });
+  // Test indents never touch get_next_indent_number()'s real counter (see
+  // POST / below) — nothing to preview from the DB, so just describe the pattern.
+  if (String(req.query.isTest) === 'true') {
+    return res.json({ indentNumber: 'TEST-<assigned on submit>' });
+  }
   try {
-    const rows = await sql`SELECT get_next_indent_number(${fyKey}::smallint) AS indent_number`;
-    res.json({ indentNumber: rows[0].indent_number });
+    let indent_number: string | undefined;
+    try {
+      await sql.begin(async (tx) => {
+        const rows = await tx`SELECT get_next_indent_number(${fyKey}::smallint) AS indent_number`;
+        throw new PreviewRollback(rows[0].indent_number);
+      });
+    } catch (e) {
+      if (e instanceof PreviewRollback) indent_number = e.indentNumber;
+      else throw e;
+    }
+    res.json({ indentNumber: indent_number });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to get next indent number' });
@@ -117,39 +142,59 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 router.post('/', requireAuth, async (req: Request, res: Response) => {
-  const { fy_key, company = 'DCPL', indent_date, indent_for, remarks, lines = [] } = req.body;
+  const { fy_key, company = 'DCPL', indent_date, indent_for, remarks, is_test, lines = [] } = req.body;
   if (!fy_key || !indent_date) return res.status(400).json({ error: 'fy_key and indent_date are required' });
 
   try {
-    const numRow = await sql`SELECT get_next_indent_number(${fy_key}::smallint) AS indent_number`;
-    const indent_number = numRow[0].indent_number;
-    const seq_number = parseInt(indent_number.replace(/\D/g, '').slice(-4), 10) || 0;
-
     const userEmail = (req as any).user?.email ?? null;
-    const indentRows = await sql`
-      INSERT INTO purchase_indents
-        (indent_number, fy_key, seq_number, company, indent_date, indent_for, remarks, status,
-         submitted_by, submitted_at)
-      VALUES
-        (${indent_number}, ${fy_key}, ${seq_number}, ${company}, ${indent_date},
-         ${indent_for ?? null}, ${remarks ?? null}, 'submitted',
-         ${userEmail}, NOW())
-      RETURNING *
-    `;
-    const indent = indentRows[0];
 
-    for (let i = 0; i < lines.length; i++) {
-      const { item_id, description, unit, quantity, stock_available, goods_required_for, preferred_brand, replacement_or_new, action_by, comments } = lines[i];
-      await sql`
-        INSERT INTO purchase_indent_lines
-          (indent_id, line_number, item_id, description, unit, quantity, stock_available,
-           goods_required_for, preferred_brand, replacement_or_new, action_by, comments)
+    // get_next_indent_number() permanently advances a per-FY counter — it
+    // must only ever be spent on an indent that actually ends up persisted,
+    // so the allocation and both inserts below now share one transaction
+    // (previously they didn't, so a failed line insert after allocation
+    // would silently leak a number on top of the whole indent failing to
+    // save). A test indent skips the real counter entirely — see POST / on
+    // orders.ts for the same pattern.
+    const indent = await sql.begin(async (tx) => {
+      let indent_number: string;
+      let seq_number: number;
+      if (is_test) {
+        const testSeqRow = await tx`SELECT nextval('purchase_indents_test_seq') AS seq`;
+        indent_number = `TEST-${Date.now()}`;
+        seq_number = Number(testSeqRow[0].seq);
+      } else {
+        const numRow = await tx`SELECT get_next_indent_number(${fy_key}::smallint) AS indent_number`;
+        indent_number = numRow[0].indent_number;
+        seq_number = parseInt(indent_number.replace(/\D/g, '').slice(-4), 10) || 0;
+      }
+
+      const indentRows = await tx`
+        INSERT INTO purchase_indents
+          (indent_number, fy_key, seq_number, company, indent_date, indent_for, remarks, status,
+           submitted_by, submitted_at, is_test)
         VALUES
-          (${indent.indent_id}, ${i + 1}, ${item_id ?? null}, ${description}, ${unit}, ${quantity},
-           ${stock_available ?? null}, ${goods_required_for ?? null}, ${preferred_brand ?? null},
-           ${replacement_or_new ?? null}, ${action_by ?? null}, ${comments ?? null})
+          (${indent_number}, ${fy_key}, ${seq_number}, ${company}, ${indent_date},
+           ${indent_for ?? null}, ${remarks ?? null}, 'submitted',
+           ${userEmail}, NOW(), ${!!is_test})
+        RETURNING *
       `;
-    }
+      const indent = indentRows[0];
+
+      for (let i = 0; i < lines.length; i++) {
+        const { item_id, description, unit, quantity, stock_available, goods_required_for, preferred_brand, replacement_or_new, action_by, comments } = lines[i];
+        await tx`
+          INSERT INTO purchase_indent_lines
+            (indent_id, line_number, item_id, description, unit, quantity, stock_available,
+             goods_required_for, preferred_brand, replacement_or_new, action_by, comments)
+          VALUES
+            (${indent.indent_id}, ${i + 1}, ${item_id ?? null}, ${description}, ${unit}, ${quantity},
+             ${stock_available ?? null}, ${goods_required_for ?? null}, ${preferred_brand ?? null},
+             ${replacement_or_new ?? null}, ${action_by ?? null}, ${comments ?? null})
+        `;
+      }
+
+      return indent;
+    });
 
     res.status(201).json({ ...indent, lines });
   } catch (err) {
@@ -247,9 +292,20 @@ router.post('/:id/revise', requireAuth, async (req: Request, res: Response) => {
     if (!origRows.length) return res.status(404).json({ error: 'Indent not found' });
     const original = origRows[0];
 
-    const numRow = await sql`SELECT get_next_indent_number(${original.fy_key}::smallint) AS indent_number`;
-    const indent_number = numRow[0].indent_number;
-    const seq_number = parseInt(indent_number.replace(/\D/g, '').slice(-4), 10) || 0;
+    // A revision of a test indent stays a test indent — same reasoning as
+    // orders.ts's revise route: it keeps drawing from the throwaway test
+    // sequence rather than suddenly consuming a real indent number.
+    let indent_number: string;
+    let seq_number: number;
+    if (original.is_test) {
+      const testSeqRow = await sql`SELECT nextval('purchase_indents_test_seq') AS seq`;
+      indent_number = `TEST-${Date.now()}`;
+      seq_number = Number(testSeqRow[0].seq);
+    } else {
+      const numRow = await sql`SELECT get_next_indent_number(${original.fy_key}::smallint) AS indent_number`;
+      indent_number = numRow[0].indent_number;
+      seq_number = parseInt(indent_number.replace(/\D/g, '').slice(-4), 10) || 0;
+    }
     const revision_number = (original.revision_number ?? 0) + 1;
     const userEmail = (req as any).user?.email ?? null;
 
@@ -257,13 +313,13 @@ router.post('/:id/revise', requireAuth, async (req: Request, res: Response) => {
       INSERT INTO purchase_indents
         (indent_number, fy_key, seq_number, company, indent_date, indent_for, remarks,
          status, submitted_by, submitted_at,
-         revision_number, parent_indent_id)
+         revision_number, parent_indent_id, is_test)
       VALUES
         (${indent_number}, ${original.fy_key}, ${seq_number},
          ${original.company}, ${original.indent_date}, ${original.indent_for ?? null},
          ${original.remarks ?? null},
          'submitted', ${userEmail}, NOW(),
-         ${revision_number}, ${id})
+         ${revision_number}, ${id}, ${!!original.is_test})
       RETURNING *
     `;
     const newIndent = newRows[0];

@@ -213,14 +213,18 @@ export default function OrderDetail() {
   const isManagerOrAdmin = user?.role === 'manager' || user?.role === 'admin';
   const isSalesperson = user?.role === 'salesperson';
   const isFactory = user?.role === 'factory';
+  // Invoicing/dispatch used to be factory-only; opened up to every sales-tab
+  // role (same relaxation as Dispatch Schedules) so sales/management can move
+  // a PI along when factory isn't the one at the keyboard.
+  const canFulfill = isManagerOrAdmin || isSalesperson || isFactory;
 
   // Role-based next action
   const getNextAction = () => {
     if (o.status === 'draft') return { label: 'Submit for Approval', next: 'sent' };
     if (o.status === 'sent' && isManagerOrAdmin) return { label: 'Mark Approved', next: 'approved' };
     if (o.status === 'approved' && isSalesperson) return { label: 'Sent to Factory', next: 'sent_to_factory' };
-    if (o.status === 'sent_to_factory' && isFactory) return { label: 'Mark Invoiced', next: 'invoiced' };
-    if (o.status === 'invoiced' && isFactory) return { label: 'Mark Dispatched', next: 'dispatched' };
+    if (o.status === 'sent_to_factory' && canFulfill) return { label: 'Mark Invoiced', next: 'invoiced' };
+    if (o.status === 'invoiced' && canFulfill) return { label: 'Mark Dispatched', next: 'dispatched' };
     return null;
   };
 
@@ -424,7 +428,7 @@ export default function OrderDetail() {
                   onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} />
               </label>
             )}
-            {isFactory && o.status === 'dispatched' && (
+            {canFulfill && o.status === 'dispatched' && (
               <label className={`flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 cursor-pointer ${uploading === 'lr' ? 'opacity-50' : ''}`}>
                 <Upload className="w-4 h-4" />
                 {o.lr_url ? 'Replace LR' : 'Upload LR'}

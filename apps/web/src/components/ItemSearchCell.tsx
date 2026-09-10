@@ -112,7 +112,7 @@ export default function ItemSearchCell({ description, unit, item_id, idx, onChan
         <div className="p-4 space-y-3">
           <div className="flex items-center justify-between mb-1">
             <p className="text-sm font-semibold text-gray-800">New Item</p>
-            <button onMouseDown={() => setCreating(false)} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
+            <button type="button" onClick={() => setCreating(false)} className="text-gray-400 hover:text-gray-600"><X className="w-4 h-4" /></button>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -146,8 +146,8 @@ export default function ItemSearchCell({ description, unit, item_id, idx, onChan
             </select>
           </div>
           <div className="flex gap-2 pt-1">
-            <button onMouseDown={handleCreate} className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">Save Item</button>
-            <button onMouseDown={() => setCreating(false)} className="px-4 py-1.5 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">Cancel</button>
+            <button type="button" onClick={handleCreate} className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700">Save Item</button>
+            <button type="button" onClick={() => setCreating(false)} className="px-4 py-1.5 border border-gray-300 text-sm rounded-lg hover:bg-gray-50">Cancel</button>
           </div>
         </div>
       ) : (
@@ -201,7 +201,7 @@ export default function ItemSearchCell({ description, unit, item_id, idx, onChan
               <p className="px-4 py-6 text-sm text-gray-400 text-center">No items found</p>
             ) : (
               results.map((item: any) => (
-                <div key={item.item_id} onMouseDown={() => select(item)}
+                <div key={item.item_id} onClick={() => select(item)}
                   className="px-3 py-2.5 hover:bg-blue-50 cursor-pointer border-b border-gray-50 last:border-0 flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="text-sm font-medium text-gray-800 leading-tight">{item.item_name}</div>
@@ -219,7 +219,7 @@ export default function ItemSearchCell({ description, unit, item_id, idx, onChan
 
           {/* Create new */}
           <div className="border-t border-gray-100 px-3 py-2.5">
-            <button onMouseDown={() => { setCreating(true); setNewName(query); }}
+            <button type="button" onClick={() => { setCreating(true); setNewName(query); }}
               className="flex items-center gap-1.5 text-sm text-green-700 hover:text-green-800">
               <Plus className="w-3.5 h-3.5" /> Create new item
             </button>

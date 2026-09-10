@@ -1,7 +1,7 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import { filtersMiddleware } from '../middleware/filters';
-import { requireAuth, requireRole } from '../middleware/auth';
+import { requireAuth } from '../middleware/auth';
 import sql from '../db/client';
 import { uploadToImagekit } from '../lib/imagekit';
 import { calcOrderTotals, calcLineAmount } from '../lib/orderTotals';
@@ -425,11 +425,6 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
   const VALID = ['draft', 'sent', 'approved', 'invoiced', 'dispatched', 'cancelled', 'sent_to_factory'];
   if (!VALID.includes(status)) return res.status(400).json({ error: 'Invalid status' });
 
-  const SALES_TAB_ROLES = ['admin', 'manager', 'salesperson', 'factory'];
-  if (['invoiced', 'dispatched'].includes(status) && !SALES_TAB_ROLES.includes(req.user?.role?.toLowerCase() ?? '')) {
-    return res.status(403).json({ error: 'Only sales-tab roles can mark orders as invoiced or dispatched' });
-  }
-
   const userEmail = req.user?.email ?? null;
   const isApproval = status === 'approved';
   const isSubmission = status === 'sent';
@@ -446,16 +441,6 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
     }
   }
 
-  // A manager/admin approving goes through as usual. Anyone else approving is
-  // "self-approval" — for when management isn't around to sign off — and must
-  // leave a comment explaining why, so the reason stays visible to everyone
-  // downstream (factory, dispatch, etc.) who opens this PI afterwards.
-  const isManagerOrAdmin = ['admin', 'manager'].includes(req.user?.role?.toLowerCase() ?? '');
-  const isSelfApproval = isApproval && !isManagerOrAdmin;
-  if (isSelfApproval && !String(comment ?? '').trim()) {
-    return res.status(400).json({ error: 'A comment is required to self-approve' });
-  }
-
   try {
     const rows = await sql`
       UPDATE sales_orders SET
@@ -465,7 +450,11 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
         submitted_at  = CASE WHEN ${isSubmission} THEN NOW()        ELSE submitted_at END,
         approved_by   = CASE WHEN ${isApproval}   THEN ${userEmail} ELSE approved_by END,
         approved_at   = CASE WHEN ${isApproval}   THEN NOW()        ELSE approved_at END,
-        is_self_approved  = CASE WHEN ${isApproval}   THEN ${isSelfApproval} ELSE is_self_approved END,
+        -- Approving through the Self-Approve button (rather than the plain
+        -- Mark Approved button) is the only path that sends a comment, so
+        -- its presence is what flags this as a self-approval — available to
+        -- anyone now, not gated by role.
+        is_self_approved  = CASE WHEN ${isApproval}   THEN (${String(comment ?? '').trim() !== ''}) ELSE is_self_approved END,
         approval_comment  = CASE WHEN ${isApproval}   THEN ${String(comment ?? '').trim() || null} ELSE approval_comment END,
         invoiced_at      = CASE WHEN ${isInvoiced}   THEN NOW()        ELSE invoiced_at END,
         dispatched_at    = CASE WHEN ${isDispatched} THEN NOW()        ELSE dispatched_at END,
@@ -500,9 +489,6 @@ router.post('/:id/split', requireAuth, async (req: Request, res: Response) => {
 
   if (!['invoiced', 'dispatched'].includes(action)) {
     return res.status(400).json({ error: 'action must be "invoiced" or "dispatched"' });
-  }
-  if (!['admin', 'manager', 'salesperson', 'factory'].includes(req.user?.role?.toLowerCase() ?? '')) {
-    return res.status(403).json({ error: 'Only sales-tab roles can mark orders as invoiced or dispatched' });
   }
   if (!Array.isArray(actionedInput) || actionedInput.length === 0) {
     return res.status(400).json({ error: 'lines is required' });
@@ -733,7 +719,7 @@ router.post('/:id/upload-proforma', requireAuth, upload.single('file') as any, a
   } catch (err) { console.error(err); res.status(500).json({ error: 'Upload failed' }); }
 });
 
-router.post('/:id/upload-approved-pi', requireAuth, requireRole('admin', 'manager'), upload.single('file') as any, async (req: Request, res: Response) => {
+router.post('/:id/upload-approved-pi', requireAuth, upload.single('file') as any, async (req: Request, res: Response) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   try {
     const prefix = await orderFilePrefix(req.params.id);

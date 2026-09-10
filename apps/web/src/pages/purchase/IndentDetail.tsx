@@ -1,7 +1,6 @@
 import { useRef, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { usePurchaseIndent, useUpdatePurchaseIndentStatus, useReviseIndent } from '@/hooks/usePurchaseIndents';
-import { useAuth } from '@/context/AuthContext';
 import IndentPdf from '@/components/IndentPdf';
 import { ArrowLeft, CheckCircle, ShoppingCart, Printer, ThumbsUp, RefreshCw, ExternalLink } from 'lucide-react';
 import html2canvas from 'html2canvas';
@@ -53,18 +52,14 @@ const PO_STATUS_COLORS: Record<string, string> = {
 export default function IndentDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
   const { data: indent, isLoading } = usePurchaseIndent(id);
   const updateStatus = useUpdatePurchaseIndentStatus(id!);
   const revise = useReviseIndent(id!);
   const printRef = useRef<HTMLDivElement>(null);
   const [printing, setPrinting] = useState(false);
 
-  const role = user?.role?.toLowerCase() ?? '';
-  const isManagerOrAdmin = ['admin', 'manager'].includes(role);
-
   const canSubmit  = indent?.status === 'draft';
-  const canApprove = indent?.status === 'submitted' && isManagerOrAdmin;
+  const canApprove = indent?.status === 'submitted';
   const canRaisePO = indent?.status === 'approved';
   const canCancel  = ['draft', 'submitted'].includes(indent?.status ?? '');
   const canRevise  = indent?.status !== 'cancelled';

@@ -1,7 +1,6 @@
 import { useState, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { usePurchaseOrder, useUpdatePurchaseOrderStatus } from '@/hooks/usePurchaseOrders';
-import { useAuth } from '@/context/AuthContext';
 import { useQueryClient } from '@tanstack/react-query';
 import PurchaseOrderPdf from '@/components/PurchaseOrderPdf';
 import { uploadPoPdf, uploadApprovedPo, uploadDispatchDoc, uploadPoApprovalAttachment } from '@/lib/api';
@@ -36,7 +35,6 @@ const STATUS_COLORS: Record<string, string> = {
 export default function PurchaseOrderDetail() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
   const queryClient = useQueryClient();
   const { data: order, isLoading } = usePurchaseOrder(id);
   const updateStatus = useUpdatePurchaseOrderStatus(id!);
@@ -50,13 +48,12 @@ export default function PurchaseOrderDetail() {
   const [approvalAttachmentFile, setApprovalAttachmentFile] = useState<File | null>(null);
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
-
-  const role = user?.role?.toLowerCase() ?? '';
-  const isManagerOrAdmin = ['admin', 'manager'].includes(role);
-  // canApprove (manager/admin) and canSelfApprove are mutually exclusive by
-  // role, so whenever pendingStatus === 'approved' comes from the self-approve
-  // button, the current user is never a manager/admin.
-  const isSelfApprovalFlow = pendingStatus === 'approved' && !isManagerOrAdmin;
+  // Approve PO and Self-Approve PO both land on pendingStatus === 'approved'
+  // — this just remembers which button was actually clicked, so the confirm
+  // modal knows whether to ask for a comment. No role check: both buttons
+  // are available to everyone, Self-Approve is simply the "record a reason"
+  // option.
+  const [isSelfApprovalFlow, setIsSelfApprovalFlow] = useState(false);
 
   const generatePdf = async (el: HTMLDivElement): Promise<Blob> => {
     el.style.display = 'block';
@@ -107,8 +104,9 @@ export default function PurchaseOrderDetail() {
     }
   };
 
-  const requestStatus = (status: string) => {
+  const requestStatus = (status: string, selfApprove = false) => {
     setPendingStatus(status);
+    setIsSelfApprovalFlow(selfApprove);
     setConfirming(true);
   };
 
@@ -130,6 +128,7 @@ export default function PurchaseOrderDetail() {
     }
     setConfirming(false);
     setPendingStatus(null);
+    setIsSelfApprovalFlow(false);
     setGrnInput('');
     setDispatchDocFile(null);
     setApprovalComment('');
@@ -148,10 +147,10 @@ export default function PurchaseOrderDetail() {
   const currentStepIdx = STATUS_FLOW.indexOf(flowStatus);
 
   const canSend         = order.status === 'draft';
-  const canApprove      = ['pending_approval', 'sent'].includes(order.status) && isManagerOrAdmin;
-  // Management isn't always around to approve — anyone else with access to this
-  // PO can approve it themselves instead, as long as they leave a comment.
-  const canSelfApprove  = ['pending_approval', 'sent'].includes(order.status) && !isManagerOrAdmin;
+  const canApprove      = ['pending_approval', 'sent'].includes(order.status);
+  // Self-Approve sits alongside the plain Approve button for anyone who
+  // wants to record a reason (and optional evidence) for the approval.
+  const canSelfApprove  = canApprove;
   const canSendToVendor = order.status === 'approved';
   const canMarkDispatched = order.status === 'sent_to_vendor';
   const canReceive      = order.status === 'dispatched_by_supplier';
@@ -184,12 +183,10 @@ export default function PurchaseOrderDetail() {
               <ExternalLink className="w-4 h-4" /> View PO PDF
             </a>
           )}
-          {isManagerOrAdmin && (
-            <label className="flex items-center gap-1 px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 cursor-pointer">
-              <Upload className="w-4 h-4" /> {uploading === 'approved' ? 'Uploading…' : 'Upload Approved PO'}
-              <input type="file" accept=".pdf" className="hidden" onChange={handleUploadApproved} />
-            </label>
-          )}
+          <label className="flex items-center gap-1 px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 cursor-pointer">
+            <Upload className="w-4 h-4" /> {uploading === 'approved' ? 'Uploading…' : 'Upload Approved PO'}
+            <input type="file" accept=".pdf" className="hidden" onChange={handleUploadApproved} />
+          </label>
           {order.approved_po_url && (
             <a href={order.approved_po_url} target="_blank" rel="noreferrer"
               className="flex items-center gap-1 px-3 py-1.5 border border-green-400 text-green-700 rounded text-sm hover:bg-green-50">
@@ -250,7 +247,7 @@ export default function PurchaseOrderDetail() {
             </button>
           )}
           {canSelfApprove && (
-            <button onClick={() => requestStatus('approved')} disabled={updateStatus.isPending}
+            <button onClick={() => requestStatus('approved', true)} disabled={updateStatus.isPending}
               className="flex items-center gap-1 px-3 py-1.5 border border-amber-400 text-amber-700 rounded text-sm hover:bg-amber-50 disabled:opacity-60">
               <AlertTriangle className="w-4 h-4" /> Self-Approve PO
             </button>
@@ -310,8 +307,8 @@ export default function PurchaseOrderDetail() {
             {isSelfApprovalFlow && (
               <>
                 <p className="text-xs text-gray-500">
-                  Use this only when management isn't available to approve. Your comment will stay
-                  visible to everyone who opens this PO afterwards.
+                  An alternative to the plain Approve button, for when you want to record why —
+                  your comment stays visible to everyone who opens this PO afterwards.
                 </p>
                 <div>
                   <label className="block text-xs font-medium text-gray-600 mb-1">Comment (required)</label>
@@ -333,7 +330,7 @@ export default function PurchaseOrderDetail() {
                 className="flex-1 px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-60">
                 Confirm
               </button>
-              <button onClick={() => { setConfirming(false); setPendingStatus(null); setDispatchDocFile(null); setApprovalComment(''); setApprovalAttachmentFile(null); }}
+              <button onClick={() => { setConfirming(false); setPendingStatus(null); setIsSelfApprovalFlow(false); setDispatchDocFile(null); setApprovalComment(''); setApprovalAttachmentFile(null); }}
                 className="flex-1 px-4 py-2 border rounded text-sm hover:bg-gray-50">
                 Cancel
               </button>

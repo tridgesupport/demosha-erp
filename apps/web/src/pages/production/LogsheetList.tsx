@@ -2,7 +2,6 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Plus, CheckSquare } from 'lucide-react';
 import { useLogsheets, useBulkApproveLogsheets } from '@/hooks/useProduction';
-import { useAuth } from '@/context/AuthContext';
 import { getProductConfig } from '@/lib/productionFormConfigs';
 
 const STATUS_COLORS: Record<string, string> = {
@@ -20,7 +19,6 @@ const STATUS_LABELS: Record<string, string> = {
 export default function LogsheetList() {
   const { productCode = '' } = useParams<{ productCode: string }>();
   const navigate = useNavigate();
-  const { user } = useAuth();
 
   const code = productCode.toUpperCase();
   const config = getProductConfig(code);
@@ -37,8 +35,9 @@ export default function LogsheetList() {
   const totalPages    = Math.ceil(total / 50);
 
   const bulkApprove = useBulkApproveLogsheets();
-  const role = user?.role?.toLowerCase() ?? '';
-  const canApprove = ['admin', 'manager', 'plant_incharge'].includes(role);
+  // No per-role gating within a tab — anyone who reached the Production
+  // tab can approve logsheets.
+  const canApprove = true;
 
   const submittedRows = rows.filter(r => r.status === 'submitted');
   const allSubmittedSelected = submittedRows.length > 0 && submittedRows.every(r => selected.has(r.logsheet_id));

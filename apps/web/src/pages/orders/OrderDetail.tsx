@@ -13,7 +13,12 @@ import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
 import { ArrowLeft, CheckCircle, Printer, Upload, FileText, ExternalLink, AlertTriangle, Paperclip, Layers, Pencil, Trash2 } from 'lucide-react';
 
-const STATUS_FLOW = ['draft', 'sent', 'approved', 'sent_to_factory', 'invoiced', 'dispatched'];
+// "Invoiced" was a distinct stage before it got folded into dispatch — it's
+// deliberately left out of the visible flow now (nothing new lands there),
+// but a handful of old orders are still parked at that status; the timeline
+// below treats them as equivalent to "Sent to Factory" rather than adding
+// invoiced back in as its own box.
+const STATUS_FLOW = ['draft', 'sent', 'approved', 'sent_to_factory', 'dispatched'];
 
 const STATUS_LABELS: Record<string, string> = {
   draft: 'Draft', sent: 'Sent for Approval', approved: 'Approved',
@@ -210,24 +215,21 @@ export default function OrderDetail() {
   if (!order) return <div className="text-center py-16 text-gray-400">Order not found</div>;
 
   const o = order as any;
-  const isManagerOrAdmin = user?.role === 'manager' || user?.role === 'admin';
-  const isSalesperson = user?.role === 'salesperson';
-  const isFactory = user?.role === 'factory';
-  // Invoicing/dispatch used to be factory-only; opened up to every sales-tab
-  // role (same relaxation as Dispatch Schedules) so sales/management can move
-  // a PI along when factory isn't the one at the keyboard.
-  const canFulfill = isManagerOrAdmin || isSalesperson || isFactory;
 
-  // Role-based next action. The "invoiced" stage has been folded into
-  // dispatch — sent_to_factory now goes straight to Mark Dispatched. Orders
-  // already sitting at 'invoiced' from before this change aren't backfilled,
-  // so that status is still handled here (same next step, same label) rather
-  // than left with no way forward.
+  // No per-role gating within a tab — reaching this page at all already
+  // means the Sales tab was granted to this user's role; every action here
+  // is available to anyone who got that far, regardless of which specific
+  // role they hold.
   const getNextAction = () => {
     if (o.status === 'draft') return { label: 'Submit for Approval', next: 'sent' };
-    if (o.status === 'sent' && isManagerOrAdmin) return { label: 'Mark Approved', next: 'approved' };
-    if (o.status === 'approved' && isSalesperson) return { label: 'Sent to Factory', next: 'sent_to_factory' };
-    if (['sent_to_factory', 'invoiced'].includes(o.status) && canFulfill) return { label: 'Mark Dispatched', next: 'dispatched' };
+    if (o.status === 'sent') return { label: 'Mark Approved', next: 'approved' };
+    if (o.status === 'approved') return { label: 'Sent to Factory', next: 'sent_to_factory' };
+    // The "invoiced" stage has been folded into dispatch — sent_to_factory
+    // now goes straight to Mark Dispatched. Orders already sitting at
+    // 'invoiced' from before that change aren't backfilled, so that status
+    // is still handled here (same next step, same label) rather than left
+    // with no way forward.
+    if (['sent_to_factory', 'invoiced'].includes(o.status)) return { label: 'Mark Dispatched', next: 'dispatched' };
     return null;
   };
 
@@ -238,19 +240,19 @@ export default function OrderDetail() {
   // sales can still line up how much is being dispatched while the bill is
   // still being chased down.
   const dispatchNeedsSalesBill = nextAction?.next === 'dispatched' && !o.sales_bill_url;
-  // Dispatch is the one stage a factory/sales user can do partially —
-  // clicking the button opens a per-line quantity editor instead of firing
-  // the whole-order transition straight away (see the fulfillment panel below).
+  // Dispatch is the one stage that can be done partially — clicking the
+  // button opens a per-line quantity editor instead of firing the
+  // whole-order transition straight away (see the fulfillment panel below).
   const isFulfillAction = nextAction != null && nextAction.next === 'dispatched';
   // A leftover part (created by a previous partial invoice/dispatch) sits at
   // sent_to_factory with nothing left to approve — it can still be revised
   // (re-quoted at a new price) or cancelled outright, same as a fresh PI.
   const canRevise = ['dispatched', 'invoiced', 'cancelled', 'sent_to_factory'].includes(o.status);
   const canCancel = ['draft', 'sent', 'approved', 'sent_to_factory'].includes(o.status);
-  // Management isn't always around to approve — anyone else with access to this
-  // PI (i.e. the salesperson who raised it) can approve it themselves instead,
-  // as long as they leave a comment explaining why.
-  const canSelfApprove = o.status === 'sent' && !isManagerOrAdmin;
+  // Self-Approve sits alongside the plain "Mark Approved" button — anyone
+  // can use either, it's just a second option for when they want to record
+  // a reason (and optional evidence) for the approval.
+  const canSelfApprove = o.status === 'sent';
 
   const handleStatusChange = async () => {
     if (!nextAction) return;
@@ -434,7 +436,7 @@ export default function OrderDetail() {
                   onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} />
               </label>
             )}
-            {canFulfill && o.status === 'dispatched' && (
+            {o.status === 'dispatched' && (
               <label className={`flex items-center gap-1.5 px-4 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 cursor-pointer ${uploading === 'lr' ? 'opacity-50' : ''}`}>
                 <Upload className="w-4 h-4" />
                 {o.lr_url ? 'Replace LR' : 'Upload LR'}
@@ -555,7 +557,7 @@ export default function OrderDetail() {
         {/* Status timeline */}
         <div className="mt-6 flex items-center gap-1 flex-wrap">
           {STATUS_FLOW.map((s, i) => {
-            const idx = STATUS_FLOW.indexOf(o.status);
+            const idx = STATUS_FLOW.indexOf(o.status === 'invoiced' ? 'sent_to_factory' : o.status);
             const done = i < idx;
             const active = i === idx;
             return (
@@ -732,8 +734,8 @@ export default function OrderDetail() {
               <h3 className="font-semibold">Self-Approve {o.pi_number}</h3>
             </div>
             <p className="text-xs text-gray-500">
-              Use this only when management isn't available to approve. Your comment will stay
-              visible to everyone who opens this PI afterwards.
+              An alternative to the plain Approve button, for when you want to record why —
+              your comment stays visible to everyone who opens this PI afterwards.
             </p>
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Comment (required)</label>

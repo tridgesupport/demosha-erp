@@ -250,10 +250,6 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
   const VALID = ['submitted', 'approved', 'po_raised', 'cancelled'];
   if (!VALID.includes(status)) return res.status(400).json({ error: 'Invalid status' });
 
-  if (status === 'approved' && !['admin', 'manager'].includes(req.user?.role?.toLowerCase() ?? '')) {
-    return res.status(403).json({ error: 'Only managers or admins can approve indents' });
-  }
-
   const userEmail    = req.user?.email ?? null;
   const isSubmission = status === 'submitted';
   const isApproval   = status === 'approved';

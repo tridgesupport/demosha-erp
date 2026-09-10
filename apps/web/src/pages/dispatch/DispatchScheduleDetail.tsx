@@ -50,8 +50,8 @@ export default function DispatchScheduleDetail() {
       await updateLine.mutateAsync({ lineId, body: edits });
       setEditingLine(null);
     } catch (err: any) {
-      // Most commonly: the linked order isn't invoiced yet, or has no sales
-      // bill uploaded — both required before a line can be marked dispatched.
+      // Most commonly: the linked order isn't sent to factory yet, or has no
+      // sales bill uploaded — both required before a line can be marked dispatched.
       setLineError(err?.message ?? 'Failed to save');
     }
   };
@@ -201,8 +201,8 @@ export default function DispatchScheduleDetail() {
                         onChange={e => handleLineEdit(line.line_id, 'dispatched_date', e.target.value)} />
                     ) : line.dispatched_date ? (
                       <span className="text-green-700 font-medium">{fmt(line.dispatched_date)}</span>
-                    ) : line.order_id && line.order_status !== 'invoiced' ? (
-                      <span className="text-amber-600 text-xs" title="Mark this order Invoiced in Orders before it can be dispatched">Not invoiced yet</span>
+                    ) : line.order_id && !['sent_to_factory', 'invoiced'].includes(line.order_status) ? (
+                      <span className="text-amber-600 text-xs" title="This order must be Sent to Factory in Orders before it can be dispatched">Not ready to dispatch</span>
                     ) : line.order_id && !line.sales_bill_url ? (
                       <span className="text-amber-600 text-xs" title="Upload the sales bill in Orders before this order can be dispatched">No sales bill</span>
                     ) : (

@@ -7,7 +7,7 @@ import OverdueBadge from '@/components/OverdueBadge';
 import ProformaInvoice from '@/components/ProformaInvoice';
 import { useCustomerOutstanding } from '@/hooks/useCustomers';
 import { useAuth } from '@/context/AuthContext';
-import { uploadSalesBill, uploadLr } from '@/lib/api';
+import { uploadSalesBill, uploadLr, uploadOrderApprovalAttachment } from '@/lib/api';
 import { useQueryClient } from '@tanstack/react-query';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -43,6 +43,10 @@ export default function OrderDetail() {
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [generatingProforma, setGeneratingProforma] = useState(false);
   const [approvalSigUrl, setApprovalSigUrl] = useState<string | null>(null);
+  const [selfApproving, setSelfApproving] = useState(false);
+  const [selfApproveComment, setSelfApproveComment] = useState('');
+  const [selfApproveFile, setSelfApproveFile] = useState<File | null>(null);
+  const [submittingSelfApproval, setSubmittingSelfApproval] = useState(false);
 
   const buyerOutstanding = useCustomerOutstanding(order?.buyer_id);
   const printRef = useRef<HTMLDivElement>(null);
@@ -245,6 +249,10 @@ export default function OrderDetail() {
   // (re-quoted at a new price) or cancelled outright, same as a fresh PI.
   const canRevise = ['dispatched', 'invoiced', 'cancelled', 'sent_to_factory'].includes(o.status);
   const canCancel = ['draft', 'sent', 'approved', 'sent_to_factory'].includes(o.status);
+  // Self-Approve sits alongside the plain "Mark Approved" button — anyone
+  // can use either, it's just a second option for when they want to record
+  // a reason (and optional evidence) for the approval.
+  const canSelfApprove = o.status === 'sent';
 
   const handleStatusChange = async () => {
     if (!nextAction) return;
@@ -300,6 +308,24 @@ export default function OrderDetail() {
       alert(err?.message || 'Failed to delete draft');
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleSelfApprove = async () => {
+    if (!selfApproveComment.trim()) return;
+    setSubmittingSelfApproval(true);
+    try {
+      await generateAndUploadApprovedPdf();
+      await updateStatus.mutateAsync({ status: 'approved', comment: selfApproveComment.trim() });
+      if (selfApproveFile) {
+        await uploadOrderApprovalAttachment(id!, selfApproveFile);
+        queryClient.invalidateQueries({ queryKey: ['order', id] });
+      }
+      setSelfApproving(false);
+      setSelfApproveComment('');
+      setSelfApproveFile(null);
+    } finally {
+      setSubmittingSelfApproval(false);
     }
   };
 
@@ -425,6 +451,14 @@ export default function OrderDetail() {
                 className="px-4 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
               >
                 {generatingPdf ? 'Generating PDF…' : updateStatus.isPending ? 'Saving…' : confirming ? `Confirm: ${nextAction.label}` : nextAction.label}
+              </button>
+            )}
+            {canSelfApprove && (
+              <button
+                onClick={() => setSelfApproving(true)}
+                className="flex items-center gap-1.5 px-4 py-1.5 border border-amber-400 text-amber-700 rounded text-sm hover:bg-amber-50"
+              >
+                <AlertTriangle className="w-4 h-4" /> Self-Approve
               </button>
             )}
             {canRevise && (
@@ -690,6 +724,50 @@ export default function OrderDetail() {
           )}
         </div>
       </div>
+
+      {/* Self-approve modal */}
+      {selfApproving && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl p-6 w-96 space-y-4">
+            <div className="flex items-center gap-2 text-amber-700">
+              <AlertTriangle className="w-5 h-5" />
+              <h3 className="font-semibold">Self-Approve {o.pi_number}</h3>
+            </div>
+            <p className="text-xs text-gray-500">
+              An alternative to the plain Approve button, for when you want to record why —
+              your comment stays visible to everyone who opens this PI afterwards.
+            </p>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Comment (required)</label>
+              <textarea
+                value={selfApproveComment}
+                onChange={(e) => setSelfApproveComment(e.target.value)}
+                placeholder="Why are you self-approving this PI?"
+                rows={3}
+                className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Attach evidence — picture or file (optional)</label>
+              <input type="file" accept=".pdf,.jpg,.jpeg,.png"
+                onChange={(e) => setSelfApproveFile(e.target.files?.[0] ?? null)}
+                className="text-xs w-full" />
+              {selfApproveFile && <p className="text-xs text-gray-500 mt-1">{selfApproveFile.name}</p>}
+            </div>
+            <div className="flex gap-3">
+              <button onClick={handleSelfApprove} disabled={!selfApproveComment.trim() || submittingSelfApproval}
+                className="flex-1 px-4 py-2 bg-amber-600 text-white rounded text-sm hover:bg-amber-700 disabled:opacity-50">
+                {submittingSelfApproval ? 'Submitting…' : 'Confirm Self-Approval'}
+              </button>
+              <button onClick={() => { setSelfApproving(false); setSelfApproveComment(''); setSelfApproveFile(null); }}
+                disabled={submittingSelfApproval}
+                className="flex-1 px-4 py-2 border rounded text-sm hover:bg-gray-50 disabled:opacity-50">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Hidden print content */}
       <div ref={printRef} style={{ display: 'none' }}>

@@ -450,9 +450,11 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
         submitted_at  = CASE WHEN ${isSubmission} THEN NOW()        ELSE submitted_at END,
         approved_by   = CASE WHEN ${isApproval}   THEN ${userEmail} ELSE approved_by END,
         approved_at   = CASE WHEN ${isApproval}   THEN NOW()        ELSE approved_at END,
-        -- "Self-approved" just records whether the approver is the same
-        -- person who submitted it — informational only now, not a gate.
-        is_self_approved  = CASE WHEN ${isApproval}   THEN (submitted_by = ${userEmail}) ELSE is_self_approved END,
+        -- Approving through the Self-Approve button (rather than the plain
+        -- Mark Approved button) is the only path that sends a comment, so
+        -- its presence is what flags this as a self-approval — available to
+        -- anyone now, not gated by role.
+        is_self_approved  = CASE WHEN ${isApproval}   THEN (${String(comment ?? '').trim() !== ''}) ELSE is_self_approved END,
         approval_comment  = CASE WHEN ${isApproval}   THEN ${String(comment ?? '').trim() || null} ELSE approval_comment END,
         invoiced_at      = CASE WHEN ${isInvoiced}   THEN NOW()        ELSE invoiced_at END,
         dispatched_at    = CASE WHEN ${isDispatched} THEN NOW()        ELSE dispatched_at END,

@@ -3,7 +3,7 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import { usePurchaseOrder, useUpdatePurchaseOrderStatus } from '@/hooks/usePurchaseOrders';
 import { useQueryClient } from '@tanstack/react-query';
 import PurchaseOrderPdf from '@/components/PurchaseOrderPdf';
-import { uploadPoPdf, uploadApprovedPo, uploadDispatchDoc } from '@/lib/api';
+import { uploadPoPdf, uploadApprovedPo, uploadDispatchDoc, uploadPoApprovalAttachment } from '@/lib/api';
 import { ArrowLeft, CheckCircle, Printer, Upload, ExternalLink, Truck, PackageCheck, Package, AlertTriangle, Paperclip } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -44,8 +44,16 @@ export default function PurchaseOrderDetail() {
   const [pendingStatus, setPendingStatus] = useState<string | null>(null);
   const [grnInput, setGrnInput] = useState('');
   const [dispatchDocFile, setDispatchDocFile] = useState<File | null>(null);
+  const [approvalComment, setApprovalComment] = useState('');
+  const [approvalAttachmentFile, setApprovalAttachmentFile] = useState<File | null>(null);
   const [generatingPdf, setGeneratingPdf] = useState(false);
   const [uploading, setUploading] = useState<string | null>(null);
+  // Approve PO and Self-Approve PO both land on pendingStatus === 'approved'
+  // — this just remembers which button was actually clicked, so the confirm
+  // modal knows whether to ask for a comment. No role check: both buttons
+  // are available to everyone, Self-Approve is simply the "record a reason"
+  // option.
+  const [isSelfApprovalFlow, setIsSelfApprovalFlow] = useState(false);
 
   const generatePdf = async (el: HTMLDivElement): Promise<Blob> => {
     el.style.display = 'block';
@@ -96,25 +104,35 @@ export default function PurchaseOrderDetail() {
     }
   };
 
-  const requestStatus = (status: string) => {
+  const requestStatus = (status: string, selfApprove = false) => {
     setPendingStatus(status);
+    setIsSelfApprovalFlow(selfApprove);
     setConfirming(true);
   };
 
   const confirmStatus = async () => {
     if (!pendingStatus) return;
+    if (isSelfApprovalFlow && !approvalComment.trim()) return;
     await updateStatus.mutateAsync({
       status: pendingStatus,
       grn_number: pendingStatus === 'received' ? grnInput : undefined,
+      comment: isSelfApprovalFlow ? approvalComment.trim() : undefined,
     });
     if (pendingStatus === 'dispatched_by_supplier' && dispatchDocFile) {
       await uploadDispatchDoc(id!, dispatchDocFile);
       queryClient.invalidateQueries({ queryKey: ['purchase-order', id] });
     }
+    if (isSelfApprovalFlow && approvalAttachmentFile) {
+      await uploadPoApprovalAttachment(id!, approvalAttachmentFile);
+      queryClient.invalidateQueries({ queryKey: ['purchase-order', id] });
+    }
     setConfirming(false);
     setPendingStatus(null);
+    setIsSelfApprovalFlow(false);
     setGrnInput('');
     setDispatchDocFile(null);
+    setApprovalComment('');
+    setApprovalAttachmentFile(null);
   };
 
   const formatDate = (d: string | null) => d ? String(d).slice(0, 10).split('-').reverse().join('/') : '—';
@@ -130,6 +148,9 @@ export default function PurchaseOrderDetail() {
 
   const canSend         = order.status === 'draft';
   const canApprove      = ['pending_approval', 'sent'].includes(order.status);
+  // Self-Approve sits alongside the plain Approve button for anyone who
+  // wants to record a reason (and optional evidence) for the approval.
+  const canSelfApprove  = canApprove;
   const canSendToVendor = order.status === 'approved';
   const canMarkDispatched = order.status === 'sent_to_vendor';
   const canReceive      = order.status === 'dispatched_by_supplier';
@@ -225,6 +246,12 @@ export default function PurchaseOrderDetail() {
               <CheckCircle className="w-4 h-4" /> Approve PO
             </button>
           )}
+          {canSelfApprove && (
+            <button onClick={() => requestStatus('approved', true)} disabled={updateStatus.isPending}
+              className="flex items-center gap-1 px-3 py-1.5 border border-amber-400 text-amber-700 rounded text-sm hover:bg-amber-50 disabled:opacity-60">
+              <AlertTriangle className="w-4 h-4" /> Self-Approve PO
+            </button>
+          )}
           {canSendToVendor && (
             <button onClick={() => requestStatus('sent_to_vendor')} disabled={updateStatus.isPending}
               className="flex items-center gap-1 px-3 py-1.5 bg-orange-600 text-white rounded text-sm hover:bg-orange-700 disabled:opacity-60">
@@ -257,7 +284,8 @@ export default function PurchaseOrderDetail() {
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
           <div className="bg-white rounded-lg shadow-xl p-6 w-80 space-y-4">
             <h3 className="font-semibold text-gray-900 flex items-center gap-1.5">
-              {pendingStatus === 'received' ? 'Record GRN' : `Confirm: ${STATUS_LABELS[pendingStatus!]}`}
+              {isSelfApprovalFlow && <AlertTriangle className="w-4 h-4 text-amber-600" />}
+              {pendingStatus === 'received' ? 'Record GRN' : isSelfApprovalFlow ? 'Self-Approve PO' : `Confirm: ${STATUS_LABELS[pendingStatus!]}`}
             </h3>
             {pendingStatus === 'received' && (
               <div>
@@ -276,12 +304,33 @@ export default function PurchaseOrderDetail() {
                 {dispatchDocFile && <p className="text-xs text-gray-500 mt-1">{dispatchDocFile.name}</p>}
               </div>
             )}
+            {isSelfApprovalFlow && (
+              <>
+                <p className="text-xs text-gray-500">
+                  An alternative to the plain Approve button, for when you want to record why —
+                  your comment stays visible to everyone who opens this PO afterwards.
+                </p>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Comment (required)</label>
+                  <textarea value={approvalComment} onChange={(e) => setApprovalComment(e.target.value)}
+                    placeholder="Why are you self-approving this PO?" rows={3}
+                    className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full" />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">Attach evidence — picture or file (optional)</label>
+                  <input type="file" accept=".pdf,.jpg,.jpeg,.png"
+                    onChange={(e) => setApprovalAttachmentFile(e.target.files?.[0] ?? null)}
+                    className="text-xs w-full" />
+                  {approvalAttachmentFile && <p className="text-xs text-gray-500 mt-1">{approvalAttachmentFile.name}</p>}
+                </div>
+              </>
+            )}
             <div className="flex gap-3">
-              <button onClick={confirmStatus} disabled={updateStatus.isPending}
+              <button onClick={confirmStatus} disabled={updateStatus.isPending || (isSelfApprovalFlow && !approvalComment.trim())}
                 className="flex-1 px-4 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-60">
                 Confirm
               </button>
-              <button onClick={() => { setConfirming(false); setPendingStatus(null); setDispatchDocFile(null); }}
+              <button onClick={() => { setConfirming(false); setPendingStatus(null); setIsSelfApprovalFlow(false); setDispatchDocFile(null); setApprovalComment(''); setApprovalAttachmentFile(null); }}
                 className="flex-1 px-4 py-2 border rounded text-sm hover:bg-gray-50">
                 Cancel
               </button>

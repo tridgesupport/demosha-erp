@@ -5,9 +5,8 @@ Every SFS PDF checked so far is a scanned/photocopied form with no text layer
 (confirmed via pdftotext on a real sample), so this is OCR-based, same
 approach as raw-material-prices/scrape_coal.py:
   - pdftoppm renders the page at 300dpi.
-  - img2table (grid-line detection + per-cell Tesseract OCR) reads the bordered
-    batch table as a DataFrame, which is far more reliable for a multi-column
-    numeric table than regexing a flat OCR text dump.
+  - img2table (grid-line detection) locates the bordered batch table and its
+    per-cell bounding boxes.
   - A second, whole-page OCR pass (pytesseract) pulls the header "Date:" field
     and the free-text remarks block, since those sit outside the bordered
     table and img2table only sees the table itself.
@@ -19,15 +18,33 @@ OCRs inconsistently:
   mostly "-") | EVPT Final Temp | BCCT Temp | 1st Reactor | 2nd Reactor |
   Clarity | NTU
 
-IMPORTANT: this has not yet been run against a real scanned SFS PDF inside an
-environment with poppler/tesseract installed (this sandbox has neither), so
-treat the column mapping and regexes below as a first cut — the first real
-upload should be checked against the source PDF and this file adjusted if
-OCR misreads a column or the date/remarks regex doesn't match. Claude Code
-can help iterate quickly since it can render and read the PDF directly.
+Verified against a real scanned sample (SFS Daily Report 2-9-26.pdf, 11
+batches) with poppler/tesseract installed locally. Two things turned out to
+matter a lot for OCR accuracy on this specific scan:
+
+1. img2table's own per-cell OCR (one Tesseract call per cell, psm=11 "sparse
+   text" by default) reads the Batch column as blank/garbage on almost every
+   row, and is spotty on Purity/Quantity/Y.R too — apparently too narrow/faint
+   a crop for that mode. Re-cropping each cell from its img2table bbox (with
+   padding), upscaling 3-4x, and re-running Tesseract in single-line mode
+   (psm=7) on just that crop reads Batch, Purity, Quantity and Y.R correctly
+   on every row of the sample. So those four columns are re-OCR'd this way
+   instead of trusted from img2table's own df/content values.
+2. The two temperature columns (EVPT Final Temp, BCCT Temp) sometimes pick up
+   a spurious leading "1" from a grid line when re-OCR'd with a digit
+   whitelist (e.g. "130" instead of "30") — but every real value in this form
+   is a plain 2-digit °C reading, so taking the last two digits of the
+   digit-only OCR output is a safe, simple fix (see _last_n_digits).
+
+Zinc Used, Zinc Brand (1st/2nd Reactor) and Clarity are still taken from
+img2table's own per-cell values — those read correctly in the sample as-is
+(including across the merged-cell blocks Zinc Used spans). NTU likewise reads
+correctly from img2table's own OCR once run through _num()'s digit-only
+cleanup.
 """
 
 import re
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -35,8 +52,7 @@ from pathlib import Path
 
 
 def _which(cmd):
-    result = subprocess.run(["which", cmd], capture_output=True)
-    return result.stdout.strip() if result.returncode == 0 else None
+    return shutil.which(cmd)
 
 
 def _parse_date(raw: str):
@@ -70,6 +86,107 @@ def _text(v):
     return s or None
 
 
+def _reactor_brand(v):
+    """Same idea as _clarity: strip img2table per-cell OCR noise — stray pipe/
+    bracket characters, and an occasional literal leading "None" (seen when
+    img2table's own OCR pass returns None for a neighbouring merged sub-cell
+    and str()-concatenates it into this one)."""
+    s = _text(v)
+    if s is None:
+        return None
+    s = re.sub(r"^None\s+", "", s)
+    s = re.sub(r"[|\[\]]", "", s).strip()
+    return s or None
+
+
+def _yield_ratio(raw):
+    """Y.R is always printed as one digit + a decimal point + three digits
+    (e.g. "1.538"), but the decimal point regularly OCRs as a comma, colon or
+    other stray mark ("1,551", "1:584") instead of dropping out cleanly like
+    _num() assumes. Strip to digits only and re-insert the point after the
+    first digit rather than risk _num() reading "1,551" as 1551."""
+    if raw is None:
+        return None
+    digits = re.sub(r"[^\d]", "", str(raw))
+    if len(digits) == 4:
+        return float(f"{digits[0]}.{digits[1:]}")
+    return _num(raw)
+
+
+def _last_n_digits(raw, n=2):
+    """EVPT/BCCT temps: digit-whitelisted OCR on the cropped cell occasionally
+    prepends a spurious "1" (a misread grid line), but every real reading in
+    this form is a plain n-digit °C value — so keep just the last n digits."""
+    if raw is None:
+        return None
+    digits = re.sub(r"[^\d]", "", str(raw))
+    if not digits:
+        return None
+    return _num(digits[-n:])
+
+
+CLARITY_MAP = [
+    (re.compile(r"EX.{0,2}CLEAR", re.IGNORECASE), "EX.CLEAR"),
+    (re.compile(r"CLEAR", re.IGNORECASE), "CLEAR"),
+    (re.compile(r"HAZY", re.IGNORECASE), "HAZY"),
+]
+
+
+def _clarity(raw):
+    """Cleans up img2table's per-cell OCR artifacts ("[EX.CLEAR|", "|CLEAR|")
+    into the plant's fixed clarity vocabulary."""
+    if raw is None:
+        return None
+    s = str(raw)
+    for pattern, label in CLARITY_MAP:
+        if pattern.search(s):
+            return label
+    return None
+
+
+BATCH_NO_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 /-]{1,14}$")
+
+
+def _batch_no(raw):
+    """Cleaned OCR text must look like a real batch code (letters/digits,
+    at least one digit) — filters out empty/garbage crops without hardcoding
+    the "NT nn" format, in case other batch prefixes show up later."""
+    if raw is None:
+        return None
+    s = re.sub(r"[|\[\]{}]", "", str(raw)).strip()
+    s = re.sub(r"\s+", " ", s)
+    if not s or not BATCH_NO_RE.match(s) or not re.search(r"\d", s):
+        return None
+    return s
+
+
+def _crop_cell(full_img, bbox, pad=4, scale=3):
+    x1, y1, x2, y2 = bbox.x1 - pad, bbox.y1 - pad, bbox.x2 + pad, bbox.y2 + pad
+    crop = full_img.crop((x1, y1, x2, y2))
+    w, h = crop.size
+    if w <= 0 or h <= 0:
+        return None
+    from PIL import Image as PILImage
+    return crop.resize((w * scale, h * scale), PILImage.LANCZOS)
+
+
+def _reocr_cell(pytesseract, full_img, bbox, psm=7, digits_only=False, pad=4, scale=3):
+    crop = _crop_cell(full_img, bbox, pad=pad, scale=scale)
+    if crop is None:
+        return None
+    config = f"--psm {psm}"
+    if digits_only:
+        config += " -c tessedit_char_whitelist=0123456789"
+    text = pytesseract.image_to_string(crop, config=config).strip()
+    return text or None
+
+
+# Column indices in the printed form (see module docstring).
+COL_SR_NO, COL_BATCH, COL_PURITY, COL_QTY, COL_YR = 0, 1, 2, 3, 4
+COL_ZINC, COL_EVPT, COL_BCCT = 5, 7, 8
+COL_R1, COL_R2, COL_CLARITY, COL_NTU = 9, 10, 11, 12
+
+
 def extract(pdf_path: str) -> dict:
     """
     Returns {"rows": [...], "warnings": [...]}. Raises RuntimeError if the
@@ -95,7 +212,10 @@ def extract(pdf_path: str) -> dict:
         import pytesseract
         from PIL import Image as PILImage
 
-        full_text = pytesseract.image_to_string(PILImage.open(png_path))
+        full_img = PILImage.open(png_path)
+        full_img.load()  # force the read now, so the temp dir can be cleaned up below
+
+        full_text = pytesseract.image_to_string(full_img)
 
         date_match = re.search(r"Date\s*[:\-]?\s*([\d/\-]{6,10})", full_text, re.IGNORECASE)
         log_date = _parse_date(date_match.group(1)) if date_match else None
@@ -103,9 +223,12 @@ def extract(pdf_path: str) -> dict:
             warnings.append("Could not find a 'Date:' field on the page via OCR.")
 
         # Remarks: the "COMIENTS:"/"COMMENTS:" block down to the signature line.
+        # OCR of the stamp's typo ("COMIENTS") turned out to insert *two*
+        # stray letters between "COM" and "NTS" ("COM" + "IE" + "NTS"), not
+        # the one the original [EI]? allowed for — widened to 0-3 letters.
         remarks = None
         remarks_match = re.search(
-            r"COM+[EI]?NTS?\s*[:\-]?\s*(.+?)(?:Plant\s*[Ii]ncharge|Production\s*Manager|$)",
+            r"COM+[A-Z]{0,3}NTS?\s*[:\-]?\s*(.+?)(?:Plant\s*[Ii]ncharge|Production\s*Manager|$)",
             full_text, re.IGNORECASE | re.DOTALL,
         )
         if remarks_match:
@@ -113,7 +236,8 @@ def extract(pdf_path: str) -> dict:
         if not remarks:
             warnings.append("Could not find a COMMENTS block via OCR — remarks will be blank.")
 
-        # ── Batch table — img2table (grid detection + per-cell OCR) ───────────
+        # ── Batch table — img2table for row/column geometry, targeted re-OCR
+        #    per cell for the columns that need it (see module docstring) ─────
         from img2table.document import Image as I2TImage
         from img2table.ocr import TesseractOCR
 
@@ -125,41 +249,51 @@ def extract(pdf_path: str) -> dict:
 
         # The batch table is the tallest one on the page (header/footer boxes are smaller).
         table = max(tables, key=lambda t: t.df.shape[0])
-        df = table.df
 
         rows = []
-        for _, cells in df.iterrows():
-            values = list(cells)
-            if len(values) < 12:
+        in_batch_block = False
+        for row_idx, cells in table.content.items():
+            if len(cells) <= max(COL_NTU, COL_BCCT):
                 continue
-            sr_no = _num(values[0])
-            batch_no = _text(values[1])
-            quantity_kgs = _num(values[3])
-            # Skip header/blank/total rows. The footer summary block ("Total
-            # Batch" / "FRESH:" / "+ ML:" / "Total", with the cumulative-kgs
-            # cells) sits inside the same bordered grid as the batch rows, so
-            # img2table returns it as extra rows of the same table — and its
-            # FRESH/+ML/Total counts or the grand-total kgs can OCR into the
-            # Batch/Quantity columns and look like a real (if incomplete) row.
-            # Sr No is the reliable tell: every real batch row has a plain
-            # integer there, every footer row has a text label instead.
-            if sr_no is None or not batch_no or quantity_kgs is None:
+
+            # Quantity gates which rows are real batch rows at all — header
+            # and blank template rows fail to re-OCR a number here. The
+            # footer summary block ("Total Batch" / "FRESH:" / "+ ML:" /
+            # "Total", with the cumulative-kgs cells) sits in the same
+            # bordered grid right after a run of blank template rows, and its
+            # own counts/totals can also OCR as a plausible-looking number —
+            # so once the batch block has started, the first row that fails
+            # to parse a quantity ends it; every row after that (blank filler
+            # or footer) is ignored rather than risking a footer row like
+            # "Total 11 batches, 16148kgs total" getting read as a 12th batch.
+            quantity_kgs = _num(_reocr_cell(pytesseract, full_img, cells[COL_QTY].bbox))
+            if quantity_kgs is None:
+                if in_batch_block:
+                    break
+                continue
+            in_batch_block = True
+
+            batch_no = _batch_no(_reocr_cell(pytesseract, full_img, cells[COL_BATCH].bbox))
+            if not batch_no:
+                warnings.append(f"Row {row_idx}: found a quantity ({quantity_kgs}) but no valid batch no. — skipped.")
                 continue
 
             rows.append({
                 "log_date": log_date,
                 "batch_no": batch_no,
-                "purity_pct": _num(values[2]),
+                "purity_pct": _num(_reocr_cell(pytesseract, full_img, cells[COL_PURITY].bbox)),
                 "quantity_kgs": quantity_kgs,
-                "yield_ratio": _num(values[4]),
-                "zinc_used_kgs": _num(values[5]),
-                # values[6] ("Zi ncPP") is intentionally unused — not modeled.
-                "evpt_final_temp_c": _num(values[7]),
-                "bcct_temp_c": _num(values[8]),
-                "reactor_1st_brand": _text(values[9]),
-                "reactor_2nd_brand": _text(values[10]),
-                "clarity": _text(values[11]),
-                "ntu": _num(values[12]) if len(values) > 12 else None,
+                "yield_ratio": _yield_ratio(_reocr_cell(pytesseract, full_img, cells[COL_YR].bbox)),
+                "zinc_used_kgs": _num(cells[COL_ZINC].value),
+                # column 6 ("Zi ncPP") is intentionally unused — not modeled.
+                "evpt_final_temp_c": _last_n_digits(
+                    _reocr_cell(pytesseract, full_img, cells[COL_EVPT].bbox, psm=8, digits_only=True, scale=4)),
+                "bcct_temp_c": _last_n_digits(
+                    _reocr_cell(pytesseract, full_img, cells[COL_BCCT].bbox, psm=8, digits_only=True, scale=4)),
+                "reactor_1st_brand": _reactor_brand(cells[COL_R1].value),
+                "reactor_2nd_brand": _reactor_brand(cells[COL_R2].value),
+                "clarity": _clarity(cells[COL_CLARITY].value),
+                "ntu": _num(cells[COL_NTU].value),
                 "remarks": remarks,
             })
 

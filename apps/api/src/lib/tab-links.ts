@@ -7,6 +7,6 @@ export const TAB_LINKS: Record<string, string[]> = {
   purchase: ['/purchase/indents', '/purchase/orders', '/purchase/vendors', '/purchase/stock-levels', '/purchase/creditors', '/catalog/products'],
   management: ['/dispatch/schedules'],
   analytics: ['/analytics/sales', '/analytics/purchase', '/analytics/outstanding', '/analytics/pnl', '/analytics/balance-sheet', '/analytics/cash-flow', '/analytics/inventory'],
-  production: ['/production/shs', '/production/analytical-register'],
+  production: ['/production/shs', '/production/analytical-register', '/production/sfs', '/production/zfs', '/production/zno', '/production/zinc-dust'],
   inventory: ['/inventory'],
 };

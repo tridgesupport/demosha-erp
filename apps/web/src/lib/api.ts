@@ -454,6 +454,50 @@ export const uploadAnalyticalRegister = (file: File) => {
   });
 };
 
+// SFS Analytical Report (batch-wise, date-wise; PDF is scanned, so upload
+// only kicks off an async extraction job — poll fetchSfsUploadStatus for it).
+export interface SfsAnalyticalRegisterFilters {
+  dateFrom?: string;
+  dateTo?: string;
+  batchNo?: string;
+  clarity?: string;
+  reactor?: string;
+  purityMin?: string;
+  purityMax?: string;
+  page?: number;
+}
+
+function sfsAnalyticalRegisterQuery(params?: SfsAnalyticalRegisterFilters): string {
+  const p = new URLSearchParams();
+  if (params?.dateFrom)  p.set('dateFrom',  params.dateFrom);
+  if (params?.dateTo)    p.set('dateTo',    params.dateTo);
+  if (params?.batchNo)   p.set('batchNo',   params.batchNo);
+  if (params?.clarity)   p.set('clarity',   params.clarity);
+  if (params?.reactor)   p.set('reactor',   params.reactor);
+  if (params?.purityMin) p.set('purityMin', params.purityMin);
+  if (params?.purityMax) p.set('purityMax', params.purityMax);
+  if (params?.page)      p.set('page',      String(params.page));
+  return p.toString();
+}
+
+export const fetchSfsAnalyticalRegister = (params?: SfsAnalyticalRegisterFilters) => {
+  const qs = sfsAnalyticalRegisterQuery(params);
+  return request(`/api/production/sfs/analytical-register${qs ? `?${qs}` : ''}`);
+};
+
+export const uploadSfsAnalyticalReport = (file: File) => {
+  const fd = new FormData();
+  fd.append('file', file, file.name);
+  return fetch(`${BASE_URL}/api/production/sfs/analytical-register/upload`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(async r => {
+    const body = await r.json();
+    if (!r.ok) throw new Error(body?.error || 'Upload failed');
+    return body as { uploadId: string; status: string };
+  });
+};
+
+export const fetchSfsUploadStatus = (uploadId: string) =>
+  request(`/api/production/sfs/analytical-register/uploads/${uploadId}`);
+
 // Catalogue SKUs
 export const fetchSkus = (search?: string) => {
   const p = new URLSearchParams({ q: search ?? '' });

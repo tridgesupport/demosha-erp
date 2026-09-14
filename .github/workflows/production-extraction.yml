@@ -1,0 +1,31 @@
+name: Production report extraction
+
+on:
+  workflow_dispatch:
+    inputs:
+      upload_id:
+        description: "production_report_uploads.upload_id to process"
+        required: true
+
+jobs:
+  extract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install system dependencies (poppler + tesseract, for scanned PDF OCR)
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils tesseract-ocr
+
+      - name: Install Python dependencies
+        working-directory: production-extraction
+        run: pip install -r requirements.txt
+
+      - name: Extract
+        working-directory: production-extraction
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: python extract.py --upload-id "${{ github.event.inputs.upload_id }}"

@@ -4,6 +4,8 @@ import {
   createLogsheet, updateLogsheetSection, updateLogsheetStatus,
   bulkApproveLogsheets, fetchAnalyticalRegister, uploadAnalyticalRegister,
   fetchAnalyticalRegisterSummary, AnalyticalRegisterFilters,
+  fetchSfsAnalyticalRegister, uploadSfsAnalyticalReport, fetchSfsUploadStatus,
+  SfsAnalyticalRegisterFilters,
 } from '@/lib/api';
 
 export function useProductionProducts() {
@@ -84,5 +86,35 @@ export function useUploadAnalyticalRegister() {
   return useMutation({
     mutationFn: (file: File) => uploadAnalyticalRegister(file),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['analytical-register'] }),
+  });
+}
+
+// ─── SFS Analytical Report ─────────────────────────────────────────────────────
+
+export function useSfsAnalyticalRegister(params?: SfsAnalyticalRegisterFilters) {
+  return useQuery({
+    queryKey: ['sfs-analytical-register', params],
+    queryFn: () => fetchSfsAnalyticalRegister(params) as Promise<{ data: any[]; total: number; page: number; limit: number }>,
+  });
+}
+
+export function useUploadSfsAnalyticalReport() {
+  return useMutation({
+    mutationFn: (file: File) => uploadSfsAnalyticalReport(file),
+  });
+}
+
+// Polls an upload's extraction status every 4s while it's still pending —
+// extraction runs as a GitHub Actions job (see production-extraction/), not
+// inline, so this is how the UI finds out when it's actually done.
+export function useSfsUploadStatus(uploadId: string | null) {
+  return useQuery({
+    queryKey: ['sfs-upload-status', uploadId],
+    queryFn: () => fetchSfsUploadStatus(uploadId!) as Promise<{ status: string; rows_upserted: number | null; error_message: string | null }>,
+    enabled: !!uploadId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'pending' || status === 'processing' ? 4000 : false;
+    },
   });
 }

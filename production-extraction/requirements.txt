@@ -1,0 +1,5 @@
+requests
+psycopg2-binary
+img2table
+pytesseract
+Pillow

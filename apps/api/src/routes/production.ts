@@ -3,6 +3,7 @@ import multer from 'multer';
 import { requireAuth } from '../middleware/auth';
 import sql from '../db/client';
 import { uploadToImagekit } from '../lib/imagekit';
+import { triggerProductionExtraction } from '../lib/githubActions';
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const router = Router();
@@ -543,6 +544,101 @@ router.post('/analytical-register/upload', requireAuth, upload.single('file') as
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: 'Failed to import analytical register' });
+  }
+});
+
+// ─── SFS Analytical Report ─────────────────────────────────────────────────────
+// PDF is a scanned form (no text layer) — extraction happens out-of-band via a
+// GitHub Actions job (see production-extraction/), not inline in this request.
+// This route just stores the file and kicks the job off.
+
+router.post('/sfs/analytical-register/upload', requireAuth, upload.single('file') as any, async (req: Request, res: Response) => {
+  if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+  const userEmail = req.user?.email ?? null;
+  try {
+    const { url, fileId } = await uploadToImagekit(req.file.buffer, req.file.originalname, 'sfs_analytical_reports');
+
+    const [uploadRow] = await sql`
+      INSERT INTO production_report_uploads (product_code, file_name, file_url, file_id, uploaded_by)
+      VALUES ('SFS', ${req.file.originalname}, ${url}, ${fileId}, ${userEmail})
+      RETURNING upload_id, status
+    `;
+
+    try {
+      await triggerProductionExtraction(uploadRow.upload_id);
+    } catch (triggerErr) {
+      console.error('Failed to trigger extraction workflow:', triggerErr);
+      await sql`
+        UPDATE production_report_uploads
+        SET status = 'failed', error_message = ${String((triggerErr as Error).message)}
+        WHERE upload_id = ${uploadRow.upload_id}
+      `;
+      return res.status(502).json({ error: 'File uploaded but failed to start extraction', uploadId: uploadRow.upload_id });
+    }
+
+    res.status(202).json({ uploadId: uploadRow.upload_id, status: 'pending' });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Upload failed' });
+  }
+});
+
+router.get('/sfs/analytical-register/uploads/:id', requireAuth, async (req: Request, res: Response) => {
+  try {
+    const rows = await sql`
+      SELECT upload_id, product_code, file_name, status, rows_upserted, error_message, uploaded_at, processed_at
+      FROM production_report_uploads
+      WHERE upload_id = ${req.params.id}
+    `;
+    if (!rows.length) return res.status(404).json({ error: 'Upload not found' });
+    res.json(rows[0]);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch upload status' });
+  }
+});
+
+router.get('/sfs/analytical-register', requireAuth, async (req: Request, res: Response) => {
+  const dateFrom  = String(req.query.dateFrom  ?? '').trim() || null;
+  const dateTo    = String(req.query.dateTo    ?? '').trim() || null;
+  const batchNo   = String(req.query.batchNo   ?? '').trim();
+  const clarity   = String(req.query.clarity   ?? '').trim();
+  const reactor   = String(req.query.reactor   ?? '').trim(); // matches either reactor brand column
+  const purityMin = req.query.purityMin != null && req.query.purityMin !== '' ? Number(req.query.purityMin) : null;
+  const purityMax = req.query.purityMax != null && req.query.purityMax !== '' ? Number(req.query.purityMax) : null;
+  const page      = Math.max(1, parseInt(String(req.query.page ?? '1'), 10));
+  const limit     = 100;
+  const offset    = (page - 1) * limit;
+
+  try {
+    const rows = await sql`
+      SELECT * FROM sfs_analytical_register
+      WHERE (${dateFrom}::date  IS NULL OR log_date >= ${dateFrom}::date)
+        AND (${dateTo}::date    IS NULL OR log_date <= ${dateTo}::date)
+        AND (${batchNo}         = ''   OR batch_no ILIKE ${'%' + batchNo + '%'})
+        AND (${clarity}         = ''   OR clarity = ${clarity})
+        AND (${reactor}         = ''   OR reactor_1st_brand = ${reactor} OR reactor_2nd_brand = ${reactor})
+        AND (${purityMin}::numeric IS NULL OR purity_pct >= ${purityMin}::numeric)
+        AND (${purityMax}::numeric IS NULL OR purity_pct <= ${purityMax}::numeric)
+      ORDER BY log_date DESC, batch_no
+      LIMIT ${limit} OFFSET ${offset}
+    `;
+
+    const countRows = await sql`
+      SELECT COUNT(*)::int AS total FROM sfs_analytical_register
+      WHERE (${dateFrom}::date  IS NULL OR log_date >= ${dateFrom}::date)
+        AND (${dateTo}::date    IS NULL OR log_date <= ${dateTo}::date)
+        AND (${batchNo}         = ''   OR batch_no ILIKE ${'%' + batchNo + '%'})
+        AND (${clarity}         = ''   OR clarity = ${clarity})
+        AND (${reactor}         = ''   OR reactor_1st_brand = ${reactor} OR reactor_2nd_brand = ${reactor})
+        AND (${purityMin}::numeric IS NULL OR purity_pct >= ${purityMin}::numeric)
+        AND (${purityMax}::numeric IS NULL OR purity_pct <= ${purityMax}::numeric)
+    `;
+
+    res.json({ data: rows, total: countRows[0].total, page, limit });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'Failed to fetch SFS analytical register' });
   }
 });
 

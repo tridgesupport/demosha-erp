@@ -29,6 +29,7 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
           o.total_amount, o.is_cancelled, o.revision_number, o.is_test,
           o.submitted_at, o.submitted_by, o.approved_at, o.approved_by,
           o.invoiced_at, o.dispatched_at,
+          o.status_changed_at, o.status_changed_by,
           fy.fy_label,
           COUNT(ol.line_id)::int AS line_count
         FROM sales_orders o
@@ -451,7 +452,8 @@ router.patch('/:id/status', requireAuth, async (req: Request, res: Response) => 
         approval_comment  = CASE WHEN ${isApproval}   THEN ${String(comment ?? '').trim() || null} ELSE approval_comment END,
         invoiced_at      = CASE WHEN ${isInvoiced}   THEN NOW()        ELSE invoiced_at END,
         dispatched_at    = CASE WHEN ${isDispatched} THEN NOW()        ELSE dispatched_at END,
-        status_changed_at = NOW()
+        status_changed_at = NOW(),
+        status_changed_by = ${userEmail}
       WHERE order_id = ${id} AND deleted_at IS NULL
       RETURNING *
     `;
@@ -488,6 +490,7 @@ router.post('/:id/split', requireAuth, async (req: Request, res: Response) => {
   }
 
   const EPS = 0.001;
+  const userEmail = req.user?.email ?? null;
 
   try {
     const result = await sql.begin(async (sql) => {
@@ -575,6 +578,7 @@ router.post('/:id/split', requireAuth, async (req: Request, res: Response) => {
             invoiced_at   = CASE WHEN ${isInvoiced}   THEN NOW() ELSE invoiced_at   END,
             dispatched_at = CASE WHEN ${isDispatched} THEN NOW() ELSE dispatched_at END,
             status_changed_at = NOW(),
+            status_changed_by = ${userEmail},
             updated_at = NOW()
           WHERE order_id = ${id}
           RETURNING *
@@ -611,6 +615,7 @@ router.post('/:id/split', requireAuth, async (req: Request, res: Response) => {
           invoiced_at   = CASE WHEN ${isInvoiced}   THEN NOW() ELSE invoiced_at   END,
           dispatched_at = CASE WHEN ${isDispatched} THEN NOW() ELSE dispatched_at END,
           status_changed_at = NOW(),
+          status_changed_by = ${userEmail},
           updated_at = NOW(),
           gross_value = ${currentTotals.gross_value},
           insurance_amount = ${currentTotals.insurance_amount},
@@ -645,7 +650,8 @@ router.post('/:id/split', requireAuth, async (req: Request, res: Response) => {
           gross_value, insurance_amount, freight_amount, assessable_value,
           igst_amount, cgst_amount, sgst_amount, tcs_amount, total_amount,
           schedule_notes, status, revision_number, is_cancelled,
-          submitted_by, submitted_at, approved_by, approved_at, is_self_approved, approval_comment
+          submitted_by, submitted_at, approved_by, approved_at, is_self_approved, approval_comment,
+          status_changed_at, status_changed_by
         ) VALUES (
           ${order.pi_number}, ${order.fy_key}, ${order.seq_number}, ${nextSuffix},
           ${order.order_date}, ${order.buyer_order_date}, ${order.buyer_po_number}, ${order.po_copy_url},
@@ -656,7 +662,8 @@ router.post('/:id/split', requireAuth, async (req: Request, res: Response) => {
           ${remainderTotals.gross_value}, ${remainderTotals.insurance_amount}, ${remainderTotals.freight_amount}, ${remainderTotals.assessable_value},
           ${remainderTotals.igst_amount}, ${remainderTotals.cgst_amount}, ${remainderTotals.sgst_amount}, ${remainderTotals.tcs_amount}, ${remainderTotals.total_amount},
           ${order.schedule_notes}, ${order.status}, ${order.revision_number}, false,
-          ${order.submitted_by}, ${order.submitted_at}, ${order.approved_by}, ${order.approved_at}, ${order.is_self_approved}, ${order.approval_comment}
+          ${order.submitted_by}, ${order.submitted_at}, ${order.approved_by}, ${order.approved_at}, ${order.is_self_approved}, ${order.approval_comment},
+          ${order.status_changed_at}, ${order.status_changed_by}
         )
         RETURNING *
       `;

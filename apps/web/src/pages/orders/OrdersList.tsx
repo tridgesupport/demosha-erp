@@ -1,14 +1,14 @@
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFiltersContext } from '@/context/FiltersContext';
 import { useOrders } from '@/hooks/useOrders';
-import { fetchOrders } from '@/lib/api';
+import { fetchOrders, updateOrderStatus } from '@/lib/api';
 import { formatINR } from '@/lib/calculations';
 import { STATUSES, STATUS_LABELS } from '@/components/FilterBar';
 import StatusBadge from '@/components/StatusBadge';
 import CustomerCombobox from '@/components/CustomerCombobox';
-import { Plus, Download, ChevronUp, ChevronDown } from 'lucide-react';
+import { Plus, Download, ChevronUp, ChevronDown, AlertTriangle } from 'lucide-react';
 
 // Server page-size cap (see GET /api/orders) — used to page through every
 // matching row when exporting "all", not just what's on screen.
@@ -16,10 +16,31 @@ const EXPORT_PAGE_SIZE = 200;
 
 type SortKey = 'pi_number' | 'order_date' | 'buyer_name' | 'agent_name' | 'total_amount' | 'status' | 'submitted_at';
 
+// Bulk actions available from the list — each is the same PATCH
+// /:id/status transition the Orders Detail page's own buttons trigger,
+// applied to every selected row that's currently sitting in one of `from`.
+// Rows in any other status are silently skipped (surfaced in the result
+// summary) rather than blocking the whole batch.
+// `id` disambiguates the two 'approved' actions (plain vs. self-approve) —
+// `status` is what's actually sent to the API.
+const BULK_ACTIONS: { id: string; status: string; label: string; from: string[]; selfApprove?: boolean; confirm?: string }[] = [
+  { id: 'sent', status: 'sent', label: 'Send for Approval', from: ['draft'] },
+  { id: 'approved', status: 'approved', label: 'Mark Approved', from: ['sent'] },
+  { id: 'self_approved', status: 'approved', label: 'Self-Approve', from: ['sent'], selfApprove: true },
+  { id: 'sent_to_factory', status: 'sent_to_factory', label: 'Send to Factory', from: ['approved'] },
+  { id: 'dispatched', status: 'dispatched', label: 'Mark Dispatched', from: ['sent_to_factory', 'invoiced'] },
+  { id: 'cancelled', status: 'cancelled', label: 'Cancel PI', from: ['draft', 'sent', 'approved', 'sent_to_factory'], confirm: 'Cancel the selected PI(s)?' },
+];
+
 export default function OrdersList() {
   const { filters, setFilter } = useFiltersContext();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkRunning, setBulkRunning] = useState<string | null>(null);
+  const [selfApprovePrompt, setSelfApprovePrompt] = useState(false);
+  const [bulkComment, setBulkComment] = useState('');
   // Local echo of filters.piNumber, debounced into the actual (URL-backed)
   // filter so every keystroke doesn't trigger its own request.
   const [piSearch, setPiSearch] = useState(filters.piNumber ?? '');
@@ -37,6 +58,11 @@ export default function OrdersList() {
   // A filter change can easily leave the current page past the end of the
   // new (smaller) result set — reset to page 1 whenever any filter changes.
   useEffect(() => { setPage(1); }, [filters.piNumber, filters.customerId, filters.status, filters.dateFrom, filters.dateTo, filters.fyKey, filters.agentId, filters.piFrom, filters.piTo]);
+
+  // Selection is scoped to whatever page/filters are on screen — carrying it
+  // across a page turn or a filter change would silently apply bulk actions
+  // to rows the user can no longer see.
+  useEffect(() => { setSelectedIds(new Set()); }, [page, filters.piNumber, filters.customerId, filters.status, filters.dateFrom, filters.dateTo, filters.fyKey, filters.agentId, filters.piFrom, filters.piTo]);
 
   const { data, isLoading } = useOrders(filters, page);
   const rows: any[] = data?.data ?? [];
@@ -73,6 +99,58 @@ export default function OrdersList() {
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     else { setSortKey(key); setSortDir('asc'); }
+  };
+
+  const toggleRow = (orderId: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(orderId)) next.delete(orderId); else next.add(orderId);
+      return next;
+    });
+  };
+
+  const allOnPageSelected = displayed.length > 0 && displayed.every((o) => selectedIds.has(o.order_id));
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) => {
+      if (allOnPageSelected) {
+        const next = new Set(prev);
+        displayed.forEach((o) => next.delete(o.order_id));
+        return next;
+      }
+      const next = new Set(prev);
+      displayed.forEach((o) => next.add(o.order_id));
+      return next;
+    });
+  };
+
+  const selectedRows = useMemo(() => displayed.filter((o) => selectedIds.has(o.order_id)), [displayed, selectedIds]);
+
+  // Applies one bulk transition to every selected row that's actually in a
+  // status it can leave for `action.key` — mismatched rows (e.g. an already-
+  // approved order sitting in a "Send for Approval" selection) are skipped
+  // rather than failing the whole batch.
+  const runBulkAction = async (action: typeof BULK_ACTIONS[number], comment?: string) => {
+    const targets = selectedRows.filter((o) => action.from.includes(o.status));
+    if (targets.length === 0) return;
+    if (action.confirm && !confirm(`${action.confirm} (${targets.length} order${targets.length !== 1 ? 's' : ''})`)) return;
+    setBulkRunning(action.id);
+    try {
+      const results = await Promise.allSettled(
+        targets.map((o) => updateOrderStatus(o.order_id, action.status, comment))
+      );
+      const failed = results.filter((r) => r.status === 'rejected').length;
+      queryClient.invalidateQueries({ queryKey: ['orders'] });
+      setSelectedIds(new Set());
+      setSelfApprovePrompt(false);
+      setBulkComment('');
+      const skipped = selectedRows.length - targets.length;
+      const parts = [`${targets.length - failed} order${targets.length - failed !== 1 ? 's' : ''} updated to "${STATUS_LABELS[action.status] ?? action.status}"`];
+      if (failed > 0) parts.push(`${failed} failed`);
+      if (skipped > 0) parts.push(`${skipped} skipped (wrong status)`);
+      alert(parts.join(', ') + '.');
+    } finally {
+      setBulkRunning(null);
+    }
   };
 
   const downloadCsv = (list: any[], filename: string) => {
@@ -212,11 +290,87 @@ export default function OrdersList() {
         ) : null}
       </div>
 
+      {selectedIds.size > 0 && (
+        <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5 flex flex-wrap items-center gap-3">
+          <span className="text-sm font-medium text-blue-900">{selectedIds.size} selected</span>
+          <div className="flex flex-wrap items-center gap-2">
+            {BULK_ACTIONS.map((action) => {
+              const applicable = selectedRows.filter((o) => action.from.includes(o.status)).length;
+              const disabled = applicable === 0 || bulkRunning !== null;
+              const danger = action.id === 'cancelled';
+              return (
+                <button
+                  key={action.id}
+                  onClick={() => (action.selfApprove ? setSelfApprovePrompt(true) : runBulkAction(action))}
+                  disabled={disabled}
+                  title={applicable === 0 ? `None of the selected orders are eligible for "${action.label}"` : `${action.label} (${applicable} eligible)`}
+                  className={`px-3 py-1.5 border rounded text-sm disabled:opacity-40 disabled:cursor-not-allowed ${
+                    danger ? 'border-red-300 bg-white text-red-700 hover:bg-red-50' : 'border-blue-300 bg-white text-blue-800 hover:bg-blue-100'
+                  }`}
+                >
+                  {bulkRunning === action.id ? 'Applying…' : `${action.label}${applicable > 0 ? ` (${applicable})` : ''}`}
+                </button>
+              );
+            })}
+          </div>
+          <button onClick={() => setSelectedIds(new Set())} className="text-xs text-blue-700 hover:underline ml-auto">
+            Clear selection
+          </button>
+
+          {selfApprovePrompt && (() => {
+            const selfApproveAction = BULK_ACTIONS.find((a) => a.id === 'self_approved')!;
+            const eligible = selectedRows.filter((o) => selfApproveAction.from.includes(o.status)).length;
+            return (
+            <div className="w-full flex items-start gap-2 bg-white border border-amber-200 rounded p-3 mt-1">
+              <AlertTriangle className="w-4 h-4 text-amber-600 mt-1 shrink-0" />
+              <div className="flex-1">
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Self-approve {eligible} order(s) — comment (optional)
+                </label>
+                <textarea
+                  value={bulkComment}
+                  onChange={(e) => setBulkComment(e.target.value)}
+                  placeholder="Why are you self-approving these PIs? (optional)"
+                  rows={2}
+                  className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full"
+                />
+                <div className="flex gap-2 mt-2">
+                  <button
+                    onClick={() => runBulkAction(selfApproveAction, bulkComment.trim() || undefined)}
+                    disabled={bulkRunning !== null}
+                    className="px-3 py-1.5 bg-amber-600 text-white rounded text-sm hover:bg-amber-700 disabled:opacity-50"
+                  >
+                    {bulkRunning === 'self_approved' ? 'Applying…' : 'Confirm Self-Approval'}
+                  </button>
+                  <button
+                    onClick={() => { setSelfApprovePrompt(false); setBulkComment(''); }}
+                    disabled={bulkRunning !== null}
+                    className="px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            </div>
+            );
+          })()}
+        </div>
+      )}
+
       <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b text-xs text-gray-500 uppercase">
+                <th className="px-4 py-2 w-8">
+                  <input
+                    type="checkbox"
+                    checked={allOnPageSelected}
+                    onChange={toggleSelectAll}
+                    onClick={(e) => e.stopPropagation()}
+                    aria-label="Select all on page"
+                  />
+                </th>
                 {([
                   ['pi_number', 'PI #'],
                   ['order_date', 'Date'],
@@ -242,14 +396,14 @@ export default function OrdersList() {
               {isLoading ? (
                 [...Array(10)].map((_, i) => (
                   <tr key={i}>
-                    <td colSpan={9} className="px-4 py-3">
+                    <td colSpan={10} className="px-4 py-3">
                       <div className="h-4 bg-gray-200 rounded animate-pulse" />
                     </td>
                   </tr>
                 ))
               ) : displayed.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
                     No orders found
                   </td>
                 </tr>
@@ -257,9 +411,17 @@ export default function OrdersList() {
                 displayed.map((o) => (
                   <tr
                     key={o.order_id}
-                    className="hover:bg-blue-50 cursor-pointer"
+                    className={`hover:bg-blue-50 cursor-pointer ${selectedIds.has(o.order_id) ? 'bg-blue-50/60' : ''}`}
                     onClick={() => navigate(`/orders/${o.order_id}`)}
                   >
+                    <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.has(o.order_id)}
+                        onChange={() => toggleRow(o.order_id)}
+                        aria-label={`Select ${o.pi_number}`}
+                      />
+                    </td>
                     <td className="px-4 py-2.5 font-medium text-blue-600">
                       {o.pi_number}{o.part_suffix && <span className="text-purple-600">-{o.part_suffix}</span>}
                       {o.is_test && (
@@ -274,17 +436,25 @@ export default function OrdersList() {
                     <td className="px-4 py-2.5"><StatusBadge status={o.status} /></td>
                     <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">
                       {(() => {
-                        const ts =
+                        // status_changed_at/by are recorded on every transition
+                        // (added after older per-stage columns like
+                        // submitted_at/approved_at) — prefer them since they
+                        // cover every status including Sent to Factory,
+                        // Dispatched and Cancelled; fall back to the older
+                        // per-stage fields for rows updated before that.
+                        const ts = o.status_changed_at ?? (
                           o.status === 'sent'            ? o.submitted_at  :
                           o.status === 'approved'        ? o.approved_at   :
                           o.status === 'sent_to_factory' ? o.approved_at   :
                           o.status === 'invoiced'        ? o.invoiced_at   :
                           o.status === 'dispatched'      ? o.dispatched_at :
-                          o.submitted_at;
-                        const by =
+                          o.submitted_at
+                        );
+                        const by = o.status_changed_by ?? (
                           o.status === 'sent'     ? o.submitted_by :
                           o.status === 'approved' || o.status === 'sent_to_factory' ? o.approved_by :
-                          null;
+                          null
+                        );
                         return ts ? (
                           <>
                             {new Date(ts).toLocaleString()}

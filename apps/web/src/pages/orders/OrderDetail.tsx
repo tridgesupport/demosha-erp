@@ -250,6 +250,11 @@ export default function OrderDetail() {
   // button opens a per-line quantity editor instead of firing the
   // whole-order transition straight away (see the fulfillment panel below).
   const isFulfillAction = nextAction != null && nextAction.next === 'dispatched';
+  // Sending to Factory is a single click, no "Confirm:" second step — unlike
+  // Submit for Approval / Mark Approved, there's nothing here worth a
+  // confirmation prompt, and it was the main friction point for bulk actions
+  // from the Orders list.
+  const skipConfirm = nextAction != null && nextAction.next === 'sent_to_factory';
   // A leftover part (created by a previous partial invoice/dispatch) sits at
   // sent_to_factory with nothing left to approve — it can still be revised
   // (re-quoted at a new price) or cancelled outright, same as a fresh PI.
@@ -318,7 +323,6 @@ export default function OrderDetail() {
   };
 
   const handleSelfApprove = async () => {
-    if (!selfApproveComment.trim()) return;
     setSubmittingSelfApproval(true);
     try {
       await generateAndUploadApprovedPdf();
@@ -384,11 +388,27 @@ export default function OrderDetail() {
                 <span className="font-medium">Approval comment:</span> {o.approval_comment}
               </p>
             )}
+            {o.status === 'sent_to_factory' && o.status_changed_at && (
+              <p className="text-xs text-gray-400">
+                Sent to Factory by {o.status_changed_by ?? '—'} on {new Date(o.status_changed_at).toLocaleString()}
+              </p>
+            )}
             {o.invoiced_at && (
-              <p className="text-xs text-gray-400">Invoiced on {new Date(o.invoiced_at).toLocaleString()}</p>
+              <p className="text-xs text-gray-400">
+                Invoiced on {new Date(o.invoiced_at).toLocaleString()}
+                {o.status === 'invoiced' && o.status_changed_by && ` by ${o.status_changed_by}`}
+              </p>
             )}
             {o.dispatched_at && (
-              <p className="text-xs text-gray-400">Dispatched on {new Date(o.dispatched_at).toLocaleString()}</p>
+              <p className="text-xs text-gray-400">
+                Dispatched on {new Date(o.dispatched_at).toLocaleString()}
+                {o.status === 'dispatched' && o.status_changed_by && ` by ${o.status_changed_by}`}
+              </p>
+            )}
+            {o.status === 'cancelled' && o.status_changed_at && (
+              <p className="text-xs text-gray-400">
+                Cancelled by {o.status_changed_by ?? '—'} on {new Date(o.status_changed_at).toLocaleString()}
+              </p>
             )}
             {o.parent_pi_number && (
               <p className="text-xs text-gray-400 mt-1">
@@ -464,11 +484,11 @@ export default function OrderDetail() {
             )}
             {nextAction && o.status !== 'cancelled' && !(isFulfillAction && confirming) && (
               <button
-                onClick={isFulfillAction ? handleStatusChange : confirming ? handleStatusChange : () => setConfirming(true)}
+                onClick={isFulfillAction || skipConfirm ? handleStatusChange : confirming ? handleStatusChange : () => setConfirming(true)}
                 disabled={updateStatus.isPending || generatingPdf}
                 className="px-4 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-50"
               >
-                {generatingPdf ? 'Generating PDF…' : updateStatus.isPending ? 'Saving…' : confirming ? `Confirm: ${nextAction.label}` : nextAction.label}
+                {generatingPdf ? 'Generating PDF…' : updateStatus.isPending ? 'Saving…' : confirming && !skipConfirm ? `Confirm: ${nextAction.label}` : nextAction.label}
               </button>
             )}
             {canSelfApprove && (
@@ -750,11 +770,11 @@ export default function OrderDetail() {
               your comment stays visible to everyone who opens this PI afterwards.
             </p>
             <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Comment (required)</label>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Comment (optional)</label>
               <textarea
                 value={selfApproveComment}
                 onChange={(e) => setSelfApproveComment(e.target.value)}
-                placeholder="Why are you self-approving this PI?"
+                placeholder="Why are you self-approving this PI? (optional)"
                 rows={3}
                 className="border border-gray-300 rounded px-2 py-1.5 text-sm w-full"
               />
@@ -767,7 +787,7 @@ export default function OrderDetail() {
               {selfApproveFile && <p className="text-xs text-gray-500 mt-1">{selfApproveFile.name}</p>}
             </div>
             <div className="flex gap-3">
-              <button onClick={handleSelfApprove} disabled={!selfApproveComment.trim() || submittingSelfApproval}
+              <button onClick={handleSelfApprove} disabled={submittingSelfApproval}
                 className="flex-1 px-4 py-2 bg-amber-600 text-white rounded text-sm hover:bg-amber-700 disabled:opacity-50">
                 {submittingSelfApproval ? 'Submitting…' : 'Confirm Self-Approval'}
               </button>

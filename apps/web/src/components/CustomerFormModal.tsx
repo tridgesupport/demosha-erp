@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { X } from 'lucide-react';
 import { createCustomer } from '@/lib/api';
 import { useStates } from '@/hooks/useCatalog';
+import { deriveStateCodeFromGstin } from '@/lib/calculations';
 import { useQueryClient } from '@tanstack/react-query';
 
 interface Props {
@@ -77,7 +78,12 @@ export default function CustomerFormModal({ onClose, onCreated }: Props) {
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Buyer GSTIN</label>
-                <input className="input w-full" value={form.gstin} onChange={(e) => set('gstin', e.target.value)} />
+                <input className="input w-full" value={form.gstin} onChange={(e) => {
+                  const gstin = e.target.value;
+                  set('gstin', gstin);
+                  const stateCode = deriveStateCodeFromGstin(gstin);
+                  if (stateCode != null) set('primary_state_code', stateCode);
+                }} />
               </div>
               <div>
                 <label className="block text-xs text-gray-500 mb-1">Buyer State</label>
@@ -116,7 +122,12 @@ export default function CustomerFormModal({ onClose, onCreated }: Props) {
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Consignee GSTIN</label>
-                  <input className="input w-full" value={form.consignee_gstin} onChange={(e) => set('consignee_gstin', e.target.value)} />
+                  <input className="input w-full" value={form.consignee_gstin} onChange={(e) => {
+                    const gstin = e.target.value;
+                    set('consignee_gstin', gstin);
+                    const stateCode = deriveStateCodeFromGstin(gstin);
+                    if (stateCode != null) set('consignee_state_code', stateCode);
+                  }} />
                 </div>
                 <div>
                   <label className="block text-xs text-gray-500 mb-1">Consignee State</label>

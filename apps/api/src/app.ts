@@ -17,6 +17,7 @@ import vendorsRouter from './routes/vendors';
 import productionRouter from './routes/production';
 import dispatchSchedulesRouter from './routes/dispatch_schedules';
 import analyticsRouter from './routes/analytics';
+import inventoryRouter from './routes/inventory';
 
 // Single source of truth for the Express app — shared by the local dev
 // server (index.ts, via app.listen) and the Vercel serverless entrypoint
@@ -57,6 +58,12 @@ const bootstrapped = (async () => {
       PRIMARY KEY (role, tab, link_path)
     )
   `;
+  // Read vs read/write, on top of the existing "can reach this tab/link at
+  // all" grant above. Defaults every existing row to 'write' so nothing
+  // that already worked silently becomes read-only on deploy — an admin
+  // downgrades specific role/tab or role/link rows to 'read' from Settings.
+  await sql`ALTER TABLE role_tab_permissions  ADD COLUMN IF NOT EXISTS access_level TEXT NOT NULL DEFAULT 'write'`;
+  await sql`ALTER TABLE role_link_permissions ADD COLUMN IF NOT EXISTS access_level TEXT NOT NULL DEFAULT 'write'`;
 
   const existingRoles = await sql`SELECT COUNT(*)::int AS c FROM roles`;
   if (existingRoles[0].c === 0) {
@@ -154,6 +161,7 @@ app.use('/api/purchase/vendors', vendorsRouter);
 app.use('/api/production', productionRouter);
 app.use('/api/dispatch-schedules', dispatchSchedulesRouter);
 app.use('/api/analytics', analyticsRouter);
+app.use('/api/inventory', inventoryRouter);
 
 app.get('/', (_req, res) => {
   res.json({ status: 'ok', message: 'Demosha ERP API' });

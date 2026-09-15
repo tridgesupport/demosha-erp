@@ -364,6 +364,11 @@ export default function PurchaseOrderDetail() {
       <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
         <div className="px-5 py-3 border-b border-gray-100">
           <h2 className="text-sm font-semibold text-gray-700">Items ({lines.length})</h2>
+          {canApprove && (
+            <p className="text-xs text-gray-400 mt-0.5">
+              Available Qty and Last Purchase are shown to help you decide whether to approve this PO.
+            </p>
+          )}
         </div>
         <div className="overflow-x-auto">
           <table className="min-w-full text-xs">
@@ -376,6 +381,8 @@ export default function PurchaseOrderDetail() {
                 <th className="px-3 py-2 text-right w-28">Rate (₹)</th>
                 <th className="px-3 py-2 text-left w-24">Rate Unit</th>
                 <th className="px-3 py-2 text-right w-28">Amount</th>
+                {canApprove && <th className="px-3 py-2 text-right w-28">Available Qty</th>}
+                {canApprove && <th className="px-3 py-2 text-left w-52">Last Purchase</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
@@ -390,6 +397,28 @@ export default function PurchaseOrderDetail() {
                   </td>
                   <td className="px-3 py-2">{l.rate_unit ?? '—'}</td>
                   <td className="px-3 py-2 text-right font-medium">{fmtINR(l.line_amount)}</td>
+                  {canApprove && (
+                    <td className="px-3 py-2 text-right">
+                      {l.available_qty != null
+                        ? `${Number(l.available_qty).toLocaleString('en-IN')} ${l.available_uom ?? ''}`
+                        : <span className="text-gray-300">—</span>}
+                    </td>
+                  )}
+                  {canApprove && (
+                    <td className="px-3 py-2 text-gray-600">
+                      {l.last_purchase_vendor ? (
+                        <>
+                          <div className="font-medium text-gray-800">{l.last_purchase_vendor}</div>
+                          <div className="text-gray-400">
+                            {l.last_purchase_rate != null
+                              ? `₹${Number(l.last_purchase_rate).toLocaleString('en-IN', { minimumFractionDigits: 2 })}${l.last_purchase_rate_unit ? ` / ${l.last_purchase_rate_unit}` : ''}`
+                              : ''}
+                            {l.last_purchase_date ? ` · ${new Date(l.last_purchase_date).toLocaleDateString('en-IN')}` : ''}
+                          </div>
+                        </>
+                      ) : <span className="text-gray-300">No prior purchase</span>}
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>
@@ -397,16 +426,19 @@ export default function PurchaseOrderDetail() {
               <tr>
                 <td colSpan={6} className="px-3 py-2 text-right text-gray-500">Gross Value</td>
                 <td className="px-3 py-2 text-right font-medium">{fmtINR(order.gross_value)}</td>
+                {canApprove && <td colSpan={2} />}
               </tr>
               <tr>
                 <td colSpan={6} className="px-3 py-2 text-right text-gray-500">
                   GST ({order.gst_type === 'IGST' ? 'IGST' : 'CGST+SGST'} @ {order.gst_rate}%)
                 </td>
                 <td className="px-3 py-2 text-right font-medium">{fmtINR(order.gst_amount)}</td>
+                {canApprove && <td colSpan={2} />}
               </tr>
               <tr className="font-bold">
                 <td colSpan={6} className="px-3 py-2 text-right border-t border-gray-200">Total</td>
                 <td className="px-3 py-2 text-right border-t border-gray-200">{fmtINR(order.total_amount)}</td>
+                {canApprove && <td colSpan={2} className="border-t border-gray-200" />}
               </tr>
             </tfoot>
           </table>

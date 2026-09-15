@@ -377,6 +377,22 @@ export const fetchStockLevels = (params?: { q?: string; category?: string; alert
 export const updateItemStock = (itemId: string, body: { current_stock?: number | null; min_level?: number | null }) =>
   request(`/api/purchase/items/${itemId}/stock`, { method: 'PUT', body: JSON.stringify(body) });
 
+// Inventory (Tally-computed current stock, tally_analytics.v_inventory_current)
+export const fetchInventory = (params?: { item?: string; stockGroup?: string; stockGroupParent?: string }) => {
+  const p = new URLSearchParams();
+  if (params?.item)             p.set('item', params.item);
+  if (params?.stockGroup)       p.set('stockGroup', params.stockGroup);
+  if (params?.stockGroupParent) p.set('stockGroupParent', params.stockGroupParent);
+  const qs = p.toString();
+  return request(`/api/inventory${qs ? `?${qs}` : ''}`);
+};
+
+export const fetchInventoryFilters = () =>
+  request<{ stock_groups: string[]; stock_group_parents: string[] }>('/api/inventory/filters');
+
+export const fetchInventoryByItem = (item: string) =>
+  request(`/api/inventory/by-item?item=${encodeURIComponent(item)}`);
+
 // Production
 export const fetchProductionProducts = () =>
   request('/api/production/products');

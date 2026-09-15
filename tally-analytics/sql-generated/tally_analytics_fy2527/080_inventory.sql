@@ -19,7 +19,7 @@
 -- items with caution; quantity_on_hand is comparatively more reliable.
 -- ------------------------------------------------------------
 CREATE OR REPLACE VIEW tally_analytics_fy2527.v_inventory_current AS
-SELECT name AS item, stock_group, stock_category, uom, gst_hsn_code,
+SELECT name AS item, stock_group, stock_group_parent, stock_category, uom, gst_hsn_code,
        closing_balance AS quantity_on_hand, closing_value AS value_on_hand
 FROM tally_analytics_fy2527.v_item_dim;
 

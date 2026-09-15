@@ -31,6 +31,7 @@ import NewLogsheet from '@/pages/production/NewLogsheet';
 import LogsheetDetail from '@/pages/production/LogsheetDetail';
 import AnalyticalRegister from '@/pages/production/AnalyticalRegister';
 import DispatchSchedulesList from '@/pages/dispatch/DispatchSchedulesList';
+import InventoryPage from '@/pages/Inventory';
 import RefreshDataButton from '@/components/analytics/RefreshDataButton';
 
 // Lazy-loaded: the Analytics tab is restricted to admin/manager and most
@@ -399,7 +400,7 @@ export default function App() {
                 <Route path="/production/:productCode/:id" element={<LogsheetDetail />} />
                 <Route path="/production/:productCode" element={<LogsheetList />} />
                 <Route path="/dispatch/schedules" element={<DispatchSchedulesList />} />
-                <Route path="/inventory" element={<ComingSoon label="Inventory" />} />
+                <Route path="/inventory" element={<InventoryPage />} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </TabGuard>

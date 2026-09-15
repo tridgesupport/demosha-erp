@@ -2,6 +2,7 @@ import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFiltersContext } from '@/context/FiltersContext';
+import { useCanWrite } from '@/context/AuthContext';
 import { useOrders } from '@/hooks/useOrders';
 import { fetchOrders, updateOrderStatus } from '@/lib/api';
 import { formatINR } from '@/lib/calculations';
@@ -34,6 +35,7 @@ const BULK_ACTIONS: { id: string; status: string; label: string; from: string[];
 
 export default function OrdersList() {
   const { filters, setFilter } = useFiltersContext();
+  const canWrite = useCanWrite('sales', '/orders');
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
@@ -241,9 +243,11 @@ export default function OrdersList() {
               </div>
             )}
           </div>
-          <Link to="/orders/new" className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">
-            <Plus className="w-4 h-4" /> New Pro Forma
-          </Link>
+          {canWrite && (
+            <Link to="/orders/new" className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700">
+              <Plus className="w-4 h-4" /> New Pro Forma
+            </Link>
+          )}
         </div>
       </div>
 
@@ -290,7 +294,7 @@ export default function OrdersList() {
         ) : null}
       </div>
 
-      {selectedIds.size > 0 && (
+      {canWrite && selectedIds.size > 0 && (
         <div className="bg-blue-50 border border-blue-200 rounded-lg px-4 py-2.5 flex flex-wrap items-center gap-3">
           <span className="text-sm font-medium text-blue-900">{selectedIds.size} selected</span>
           <div className="flex flex-wrap items-center gap-2">

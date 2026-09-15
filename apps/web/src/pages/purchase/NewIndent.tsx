@@ -137,8 +137,7 @@ export default function NewIndent() {
     return errs;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
+  const handleSubmit = async (status: 'draft' | 'submitted') => {
     const errs = validate();
     if (errs.length) { setErrors(errs); return; }
     setErrors([]);
@@ -150,6 +149,7 @@ export default function NewIndent() {
         indent_for: indentFor || null,
         remarks: remarks || null,
         is_test: isTest,
+        status,
         lines: lines.map((l) => ({
           item_id: l.item_id || null,
           description: l.description.trim(),
@@ -187,7 +187,7 @@ export default function NewIndent() {
         </div>
       )}
 
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form onSubmit={(e) => e.preventDefault()} className="space-y-6">
         {/* Header */}
         <div className="bg-white border border-gray-200 rounded-lg p-5 space-y-4">
           <h2 className="text-sm font-semibold text-gray-700">Indent Details</h2>
@@ -336,9 +336,13 @@ export default function NewIndent() {
         <div className="flex justify-end gap-3">
           <button type="button" onClick={() => navigate(-1)}
             className="px-4 py-2 border border-gray-300 rounded text-sm hover:bg-gray-50">Cancel</button>
-          <button type="submit" disabled={saving}
+          <button type="button" onClick={() => handleSubmit('draft')} disabled={saving}
+            className="px-4 py-2 border border-gray-300 rounded text-sm font-medium hover:bg-gray-50 disabled:opacity-60">
+            {saving ? 'Saving…' : 'Save Draft'}
+          </button>
+          <button type="button" onClick={() => handleSubmit('submitted')} disabled={saving}
             className="px-6 py-2 bg-blue-600 text-white rounded text-sm hover:bg-blue-700 disabled:opacity-60">
-            {saving ? 'Saving…' : 'Create Indent'}
+            {saving ? 'Saving…' : 'Submit for Approval'}
           </button>
         </div>
       </form>

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchVendors, createVendor, updateVendor } from '@/lib/api';
 import { X, Pencil, Plus } from 'lucide-react';
+import { useCanWrite } from '@/context/AuthContext';
 
 interface Vendor {
   vendor_id: string;
@@ -143,6 +144,7 @@ function VendorModal({
 }
 
 export default function VendorsList() {
+  const canWrite = useCanWrite('purchase', '/purchase/vendors');
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const [page, setPage] = useState(1);
@@ -167,12 +169,14 @@ export default function VendorsList() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Vendors / Suppliers</h1>
-        <button
-          onClick={() => setModal({ open: true, vendor: null })}
-          className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700"
-        >
-          <Plus className="w-4 h-4" /> Add Vendor
-        </button>
+        {canWrite && (
+          <button
+            onClick={() => setModal({ open: true, vendor: null })}
+            className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700"
+          >
+            <Plus className="w-4 h-4" /> Add Vendor
+          </button>
+        )}
       </div>
 
       {modal.open && (
@@ -230,12 +234,14 @@ export default function VendorsList() {
                     <td className="px-4 py-2.5 text-gray-500">{v.attn || '—'}</td>
                     <td className="px-4 py-2.5 text-gray-500 text-xs">{v.email || '—'}</td>
                     <td className="px-4 py-2.5">
-                      <button
-                        onClick={() => setModal({ open: true, vendor: v })}
-                        className="text-gray-400 hover:text-blue-600 p-1"
-                      >
-                        <Pencil className="w-3.5 h-3.5" />
-                      </button>
+                      {canWrite && (
+                        <button
+                          onClick={() => setModal({ open: true, vendor: v })}
+                          className="text-gray-400 hover:text-blue-600 p-1"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))

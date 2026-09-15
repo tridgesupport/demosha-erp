@@ -6,7 +6,7 @@ import CustomerFormModal from '@/components/CustomerFormModal';
 import CustomerCombobox from '@/components/CustomerCombobox';
 import { useCreateOrder, useUpdateOrder, useUpdateOrderStatus, useOrder } from '@/hooks/useOrders';
 import { useStates } from '@/hooks/useCatalog';
-import { calcOrderTotals, determineGstType, formatINR, calcNumPackages, calcLineAmount } from '@/lib/calculations';
+import { calcOrderTotals, determineGstType, deriveStateCodeFromGstin, formatINR, calcNumPackages, calcLineAmount } from '@/lib/calculations';
 import PiLineItemsTable, { LineItem, emptyLineItem } from '@/components/PiLineItemsTable';
 import TotalsSidebar from '@/components/TotalsSidebar';
 import OutstandingWarningBanner from '@/components/OutstandingWarningBanner';
@@ -473,7 +473,15 @@ export default function NewOrder() {
               )}
               {buyerId && <OutstandingWarningBanner customerId={buyerId} />}
               <Field label="GSTIN">
-                <input className="input" value={buyerGstin} onChange={(e) => setBuyerGstin(e.target.value)} />
+                <input className="input" value={buyerGstin} onChange={(e) => {
+                  const gstin = e.target.value;
+                  setBuyerGstin(gstin);
+                  const derived = deriveStateCodeFromGstin(gstin);
+                  if (derived != null) {
+                    setBuyerStateCode(derived);
+                    setGstType(determineGstType(derived));
+                  }
+                }} />
               </Field>
               <Field label="State">
                 <select className="input" value={buyerStateCode ?? ''} onChange={(e) => {
@@ -549,7 +557,12 @@ export default function NewOrder() {
                             <input className="input" value={newConName} onChange={(e) => setNewConName(e.target.value)} />
                           </Field>
                           <Field label="GSTIN">
-                            <input className="input" value={newConGstin} onChange={(e) => setNewConGstin(e.target.value)} />
+                            <input className="input" value={newConGstin} onChange={(e) => {
+                              const gstin = e.target.value;
+                              setNewConGstin(gstin);
+                              const derived = deriveStateCodeFromGstin(gstin);
+                              if (derived != null) setNewConStateCode(derived);
+                            }} />
                           </Field>
                           <Field label="State">
                             <select className="input" value={newConStateCode ?? ''} onChange={(e) => setNewConStateCode(parseInt(e.target.value, 10) || null)}>
@@ -593,7 +606,15 @@ export default function NewOrder() {
                           </Field>
                         )}
                         <Field label="GSTIN">
-                          <input className="input" value={consigneeGstin} onChange={(e) => setConsigneeGstin(e.target.value)} />
+                          <input className="input" value={consigneeGstin} onChange={(e) => {
+                            const gstin = e.target.value;
+                            setConsigneeGstin(gstin);
+                            const derived = deriveStateCodeFromGstin(gstin);
+                            if (derived != null) {
+                              setConsigneeStateCode(derived);
+                              setGstType(determineGstType(derived));
+                            }
+                          }} />
                         </Field>
                         <Field label="State">
                           <select className="input" value={consigneeStateCode ?? ''} onChange={(e) => {
@@ -677,9 +698,25 @@ export default function NewOrder() {
               </Field>
               <Field label="GST Type">
                 <select className="input" value={gstType} onChange={(e) => setGstType(e.target.value as 'IGST' | 'CGST_SGST')}>
-                  <option value="IGST">IGST @ 18%</option>
-                  <option value="CGST_SGST">CGST + SGST @ 9% each</option>
+                  <option value="IGST">IGST</option>
+                  <option value="CGST_SGST">CGST + SGST</option>
                 </select>
+              </Field>
+              <Field label={gstType === 'IGST' ? 'IGST Rate %' : 'GST Rate % (CGST + SGST, split half-half)'}>
+                <input
+                  type="number"
+                  step={0.01}
+                  className="input"
+                  value={gstType === 'IGST' ? igstRate : cgstRate * 2}
+                  onChange={(e) => {
+                    const total = parseFloat(e.target.value) || 0;
+                    if (gstType === 'IGST') {
+                      setIgstRate(total);
+                    } else {
+                      setCgstRate(total / 2);
+                    }
+                  }}
+                />
               </Field>
               <Field label="TCS Rate %">
                 <input type="number" step={0.01} className="input" value={tcsRate} onChange={(e) => setTcsRate(parseFloat(e.target.value) || 0)} />

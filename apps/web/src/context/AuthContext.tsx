@@ -8,6 +8,12 @@ export interface AuthUser {
   signature_url: string | null;
   allowed_tabs: string[];
   allowed_links: Record<string, string[]>;
+  // 'read' | 'write' per tab / per link within a tab — a tab/link present in
+  // allowed_tabs/allowed_links but absent here (older cached session) is
+  // treated as 'write' by useCanWrite below, matching the pre-read/write
+  // default every existing grant got when this was introduced.
+  tab_access?: Record<string, 'read' | 'write'>;
+  link_access?: Record<string, Record<string, 'read' | 'write'>>;
   must_change_password: boolean;
 }
 
@@ -73,6 +79,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth() {
   return useContext(AuthContext);
+}
+
+// Whether the current user has write access to `tab` (optionally narrowed
+// to one link within it, e.g. useCanWrite('purchase', '/purchase/indents')).
+// Admins and any role missing an explicit access_level default to write —
+// read-only is something an admin has to opt a role into from Settings.
+export function useCanWrite(tab: string, linkPath?: string): boolean {
+  const { user } = useAuth();
+  if (!user) return false;
+  const level = linkPath
+    ? (user.link_access?.[tab]?.[linkPath] ?? user.tab_access?.[tab])
+    : user.tab_access?.[tab];
+  return level !== 'read';
 }
 
 export function authHeaders() {

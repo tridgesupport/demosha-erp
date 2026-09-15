@@ -142,8 +142,9 @@ router.get('/:id', async (req: Request, res: Response) => {
 });
 
 router.post('/', requireAuth, async (req: Request, res: Response) => {
-  const { fy_key, company = 'DCPL', indent_date, indent_for, remarks, is_test, lines = [] } = req.body;
+  const { fy_key, company = 'DCPL', indent_date, indent_for, remarks, is_test, status = 'draft', lines = [] } = req.body;
   if (!fy_key || !indent_date) return res.status(400).json({ error: 'fy_key and indent_date are required' });
+  if (!['draft', 'submitted'].includes(status)) return res.status(400).json({ error: 'Invalid status' });
 
   try {
     const userEmail = (req as any).user?.email ?? null;
@@ -168,14 +169,15 @@ router.post('/', requireAuth, async (req: Request, res: Response) => {
         seq_number = parseInt(indent_number.replace(/\D/g, '').slice(-4), 10) || 0;
       }
 
+      const isSubmission = status === 'submitted';
       const indentRows = await tx`
         INSERT INTO purchase_indents
           (indent_number, fy_key, seq_number, company, indent_date, indent_for, remarks, status,
            submitted_by, submitted_at, is_test)
         VALUES
           (${indent_number}, ${fy_key}, ${seq_number}, ${company}, ${indent_date},
-           ${indent_for ?? null}, ${remarks ?? null}, 'submitted',
-           ${userEmail}, NOW(), ${!!is_test})
+           ${indent_for ?? null}, ${remarks ?? null}, ${status},
+           ${isSubmission ? userEmail : null}, ${isSubmission ? new Date() : null}, ${!!is_test})
         RETURNING *
       `;
       const indent = indentRows[0];

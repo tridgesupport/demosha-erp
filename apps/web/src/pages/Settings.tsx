@@ -327,7 +327,8 @@ function PermissionsTab() {
   const TABS = ['sales', 'purchase', 'management', 'production', 'inventory'] as const;
   const qc = useQueryClient();
 
-  type PermMap = Record<string, Record<string, boolean>>;
+  type AccessLevel = 'none' | 'read' | 'write';
+  type PermMap = Record<string, Record<string, AccessLevel>>;
 
   const { data: perms, refetch, isLoading } = useQuery<PermMap>({
     queryKey: ['tab-permissions'],
@@ -345,18 +346,18 @@ function PermissionsTab() {
   const [addingRole, setAddingRole] = useState(false);
   const [deletingRole, setDeletingRole] = useState<string | null>(null);
 
-  const toggle = async (role: string, tab: string, allowed: boolean) => {
+  const setAccessLevel = async (role: string, tab: string, access_level: AccessLevel) => {
     setSaving(`${role}:${tab}`);
     setError('');
     const res = await fetch(`${BASE}/api/auth/tab-permissions`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...authHeader() },
-      body: JSON.stringify({ role, tab, allowed }),
+      body: JSON.stringify({ role, tab, access_level }),
     });
     if (!res.ok) { const e = await res.json(); setError(e.error ?? 'Failed to update'); }
-    // Granting/revoking a tab cascades to its links on the server (grant ->
-    // full link access; revoke -> clears them), so the fine-tune panel
-    // below needs a fresh copy too.
+    // Granting/revoking/downgrading a tab cascades to its links on the
+    // server (grant -> full link access at the same level; revoke ->
+    // clears them), so the fine-tune panel below needs a fresh copy too.
     await Promise.all([refetch(), qc.invalidateQueries({ queryKey: ['link-permissions'] })]);
     setSaving(null);
   };
@@ -385,10 +386,10 @@ function PermissionsTab() {
 
   return (
     <div className="space-y-4">
-      <p className="text-sm text-gray-500">Configure which tabs each role can access.</p>
+      <p className="text-sm text-gray-500">Configure which tabs each role can access, and whether that access is read-only or read/write.</p>
       {error && <p className="text-xs text-red-600">{error}</p>}
 
-      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden max-w-xl">
+      <div className="bg-white border border-gray-200 rounded-lg overflow-hidden max-w-2xl">
         <table className="w-full text-sm">
           <thead>
             <tr className="bg-gray-50 border-b text-xs text-gray-500 uppercase">
@@ -402,13 +403,17 @@ function PermissionsTab() {
               <tr key={role}>
                 <td className="px-4 py-2 font-medium capitalize">{role}</td>
                 {TABS.map(tab => {
-                  const checked = perms?.[role]?.[tab] ?? false;
+                  const level: AccessLevel = perms?.[role]?.[tab] ?? 'none';
                   const key = `${role}:${tab}`;
                   return (
                     <td key={tab} className="px-4 py-2 text-center">
-                      <input type="checkbox" checked={checked} disabled={saving === key}
-                        onChange={e => toggle(role, tab, e.target.checked)}
-                        className="w-4 h-4 accent-blue-600 cursor-pointer disabled:opacity-50" />
+                      <select value={level} disabled={saving === key}
+                        onChange={e => setAccessLevel(role, tab, e.target.value as AccessLevel)}
+                        className="border border-gray-300 rounded px-1.5 py-1 text-xs disabled:opacity-50">
+                        <option value="none">None</option>
+                        <option value="read">Read</option>
+                        <option value="write">Read/Write</option>
+                      </select>
                     </td>
                   );
                 })}
@@ -452,8 +457,9 @@ function PermissionsTab() {
 // Orders under Sales, not Dashboard/Customers/Sundry Debtors). Only shown
 // for tabs the role already has via the matrix above — a tab it doesn't
 // have is fully hidden regardless of its link rows.
-function LinkPermissionsPanel({ roles, tabPerms }: { roles: string[]; tabPerms: Record<string, Record<string, boolean>> }) {
-  type LinkPermMap = Record<string, Record<string, Record<string, boolean>>>;
+function LinkPermissionsPanel({ roles, tabPerms }: { roles: string[]; tabPerms: Record<string, Record<string, string>> }) {
+  type AccessLevel = 'none' | 'read' | 'write';
+  type LinkPermMap = Record<string, Record<string, Record<string, AccessLevel>>>;
 
   const { data: linkPerms, refetch } = useQuery<LinkPermMap>({
     queryKey: ['link-permissions'],
@@ -465,15 +471,15 @@ function LinkPermissionsPanel({ roles, tabPerms }: { roles: string[]; tabPerms: 
   const [saving, setSaving] = useState<string | null>(null);
 
   const selectedRole = role || roles[0] || '';
-  const grantedTabs = Object.keys(TAB_CONFIG).filter(t => tabPerms[selectedRole]?.[t]);
+  const grantedTabs = Object.keys(TAB_CONFIG).filter(t => (tabPerms[selectedRole]?.[t] ?? 'none') !== 'none');
 
-  const toggleLink = async (tab: string, link_path: string, allowed: boolean) => {
+  const setLinkAccessLevel = async (tab: string, link_path: string, access_level: AccessLevel) => {
     const key = `${selectedRole}:${tab}:${link_path}`;
     setSaving(key);
     await fetch(`${BASE}/api/auth/link-permissions`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json', ...authHeader() },
-      body: JSON.stringify({ role: selectedRole, tab, link_path, allowed }),
+      body: JSON.stringify({ role: selectedRole, tab, link_path, access_level }),
     });
     await refetch();
     setSaving(null);
@@ -503,7 +509,7 @@ function LinkPermissionsPanel({ roles, tabPerms }: { roles: string[]; tabPerms: 
         {grantedTabs.map(tab => {
           const isOpen = expanded[tab] ?? false;
           const links = TAB_CONFIG[tab].links;
-          const allowedCount = links.filter(l => linkPerms?.[selectedRole]?.[tab]?.[l.to]).length;
+          const allowedCount = links.filter(l => (linkPerms?.[selectedRole]?.[tab]?.[l.to] ?? 'none') !== 'none').length;
           return (
             <div key={tab}>
               <button onClick={() => setExpanded(e => ({ ...e, [tab]: !isOpen }))}
@@ -517,17 +523,21 @@ function LinkPermissionsPanel({ roles, tabPerms }: { roles: string[]; tabPerms: 
                 </span>
               </button>
               {isOpen && (
-                <div className="px-4 pb-2 pl-9 space-y-1">
+                <div className="px-4 pb-2 pl-9 space-y-1.5">
                   {links.map(link => {
-                    const checked = linkPerms?.[selectedRole]?.[tab]?.[link.to] ?? false;
+                    const level: AccessLevel = linkPerms?.[selectedRole]?.[tab]?.[link.to] ?? 'none';
                     const key = `${selectedRole}:${tab}:${link.to}`;
                     return (
-                      <label key={link.to} className="flex items-center gap-2 text-sm text-gray-600 py-0.5 cursor-pointer">
-                        <input type="checkbox" checked={checked} disabled={saving === key}
-                          onChange={e => toggleLink(tab, link.to, e.target.checked)}
-                          className="w-4 h-4 accent-blue-600 cursor-pointer disabled:opacity-50" />
-                        {link.label}
-                      </label>
+                      <div key={link.to} className="flex items-center justify-between gap-2 text-sm text-gray-600 py-0.5">
+                        <span>{link.label}</span>
+                        <select value={level} disabled={saving === key}
+                          onChange={e => setLinkAccessLevel(tab, link.to, e.target.value as AccessLevel)}
+                          className="border border-gray-300 rounded px-1.5 py-0.5 text-xs disabled:opacity-50">
+                          <option value="none">None</option>
+                          <option value="read">Read</option>
+                          <option value="write">Read/Write</option>
+                        </select>
+                      </div>
                     );
                   })}
                 </div>

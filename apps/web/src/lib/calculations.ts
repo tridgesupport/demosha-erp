@@ -85,3 +85,12 @@ export function determineGstType(buyerStateCode: number | null | undefined): 'IG
   if (buyerStateCode == null) return 'IGST';
   return buyerStateCode === COMPANY_STATE ? 'CGST_SGST' : 'IGST';
 }
+
+// A GSTIN's first two digits are the GST state code (e.g. "24AAAAA..." -> 24, Gujarat).
+export function deriveStateCodeFromGstin(gstin: string | null | undefined): number | null {
+  if (!gstin) return null;
+  const match = gstin.trim().match(/^(\d{2})/);
+  if (!match) return null;
+  const code = parseInt(match[1], 10);
+  return code >= 1 && code <= 38 ? code : null;
+}

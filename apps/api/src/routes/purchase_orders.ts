@@ -77,10 +77,43 @@ router.get('/:id', async (req: Request, res: Response) => {
         LEFT JOIN users                  u  ON u.email = o.approved_by AND u.deleted_at IS NULL
         WHERE o.order_id = ${id} AND o.deleted_at IS NULL
       `,
+      // available_qty/available_uom come from tally_analytics.v_inventory_current
+      // (Tally-computed stock snapshot, same source as the Inventory tab),
+      // matched to this line's purchase_items catalog name — best-effort,
+      // since the two item name lists aren't guaranteed to line up exactly.
+      // last_purchase_* is this app's own purchase history: the most recent
+      // *other* PO line for the same item_id, excluding this order itself
+      // and cancelled orders.
       sql`
-        SELECT l.*, pi.item_name
+        SELECT l.*, pi.item_name,
+          inv.quantity_on_hand AS available_qty,
+          inv.uom              AS available_uom,
+          lp.vendor_name       AS last_purchase_vendor,
+          lp.rate              AS last_purchase_rate,
+          lp.rate_unit         AS last_purchase_rate_unit,
+          lp.order_date        AS last_purchase_date
         FROM purchase_order_lines l
         LEFT JOIN purchase_items pi ON pi.item_id = l.item_id
+        LEFT JOIN LATERAL (
+          SELECT inv.quantity_on_hand, inv.uom
+          FROM tally_analytics.v_inventory_current inv
+          WHERE pi.item_name IS NOT NULL AND lower(inv.item) = lower(pi.item_name)
+          LIMIT 1
+        ) inv ON true
+        LEFT JOIN LATERAL (
+          SELECT ol.rate, ol.rate_unit, po.order_date,
+                 COALESCE(v.vendor_name, po.supplier_name) AS vendor_name
+          FROM purchase_order_lines ol
+          JOIN purchase_orders po ON po.order_id = ol.order_id
+          LEFT JOIN vendors v ON v.vendor_id = po.vendor_id
+          WHERE l.item_id IS NOT NULL
+            AND ol.item_id = l.item_id
+            AND po.order_id <> l.order_id
+            AND po.deleted_at IS NULL
+            AND po.status <> 'cancelled'
+          ORDER BY po.order_date DESC
+          LIMIT 1
+        ) lp ON true
         WHERE l.order_id = ${id}
         ORDER BY l.line_number
       `,

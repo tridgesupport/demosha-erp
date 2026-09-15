@@ -4,6 +4,7 @@ import { usePurchaseOrders } from '@/hooks/usePurchaseOrders';
 import { Plus, ChevronUp, ChevronDown } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
 import { fetchFinancialYears } from '@/lib/api';
+import { useCanWrite } from '@/context/AuthContext';
 
 const PO_STATUS_LABELS: Record<string, string> = {
   draft: 'Approval Pending',
@@ -29,6 +30,7 @@ type SortKey = 'po_number' | 'order_date' | 'supplier_name' | 'total_amount' | '
 
 export default function PurchaseOrdersList() {
   const navigate = useNavigate();
+  const canWrite = useCanWrite('purchase', '/purchase/orders');
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('order_date');
@@ -70,12 +72,14 @@ export default function PurchaseOrdersList() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold text-gray-900">Purchase Orders</h1>
-        <button
-          onClick={() => navigate('/purchase/orders/new')}
-          className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
-        >
-          <Plus className="w-4 h-4" /> New PO
-        </button>
+        {canWrite && (
+          <button
+            onClick={() => navigate('/purchase/orders/new')}
+            className="flex items-center gap-1 px-3 py-1.5 bg-blue-600 text-white rounded text-sm hover:bg-blue-700"
+          >
+            <Plus className="w-4 h-4" /> New PO
+          </button>
+        )}
       </div>
 
       <div className="flex gap-3 items-center flex-wrap">

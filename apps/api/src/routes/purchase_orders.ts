@@ -22,7 +22,8 @@ router.get('/', async (req: Request, res: Response) => {
           o.supplier_id, o.supplier_name, o.indent_number, o.dept,
           o.total_amount, o.is_cancelled, o.revision_number, o.status_changed_at,
           fy.fy_label,
-          COUNT(l.line_id)::int AS line_count
+          COUNT(l.line_id)::int AS line_count,
+          COALESCE(SUM(l.quantity), 0) AS total_qty
         FROM purchase_orders o
         LEFT JOIN lookup_financial_years fy ON fy.fy_key = o.fy_key
         LEFT JOIN purchase_order_lines   l  ON l.order_id = o.order_id

@@ -340,26 +340,47 @@ function PermissionsTab() {
     queryFn: fetchRoles,
   });
 
-  const [saving, setSaving] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [newRole, setNewRole] = useState('');
   const [addingRole, setAddingRole] = useState(false);
   const [deletingRole, setDeletingRole] = useState<string | null>(null);
 
-  const setAccessLevel = async (role: string, tab: string, access_level: AccessLevel) => {
-    setSaving(`${role}:${tab}`);
+  // Edits are staged here (keyed "role:tab") and only sent to the server
+  // when Save is clicked — changing a dropdown no longer PATCHes immediately.
+  const [pending, setPending] = useState<Record<string, AccessLevel>>({});
+  const pendingCount = Object.keys(pending).length;
+
+  const stageAccessLevel = (role: string, tab: string, access_level: AccessLevel) => {
+    setPending(p => ({ ...p, [`${role}:${tab}`]: access_level }));
+  };
+
+  const discardChanges = () => setPending({});
+
+  const saveChanges = async () => {
+    setSaving(true);
     setError('');
-    const res = await fetch(`${BASE}/api/auth/tab-permissions`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', ...authHeader() },
-      body: JSON.stringify({ role, tab, access_level }),
-    });
-    if (!res.ok) { const e = await res.json(); setError(e.error ?? 'Failed to update'); }
-    // Granting/revoking/downgrading a tab cascades to its links on the
-    // server (grant -> full link access at the same level; revoke ->
-    // clears them), so the fine-tune panel below needs a fresh copy too.
-    await Promise.all([refetch(), qc.invalidateQueries({ queryKey: ['link-permissions'] })]);
-    setSaving(null);
+    try {
+      const entries = Object.entries(pending);
+      for (const [key, access_level] of entries) {
+        const [role, tab] = key.split(':');
+        const res = await fetch(`${BASE}/api/auth/tab-permissions`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', ...authHeader() },
+          body: JSON.stringify({ role, tab, access_level }),
+        });
+        if (!res.ok) { const e = await res.json(); throw new Error(e.error ?? 'Failed to update'); }
+      }
+      setPending({});
+      // Granting/revoking/downgrading a tab cascades to its links on the
+      // server (grant -> full link access at the same level; revoke ->
+      // clears them), so the fine-tune panel below needs a fresh copy too.
+      await Promise.all([refetch(), qc.invalidateQueries({ queryKey: ['link-permissions'] })]);
+    } catch (err: any) {
+      setError(err.message ?? 'Failed to save changes');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const handleAddRole = async () => {
@@ -403,13 +424,14 @@ function PermissionsTab() {
               <tr key={role}>
                 <td className="px-4 py-2 font-medium capitalize">{role}</td>
                 {TABS.map(tab => {
-                  const level: AccessLevel = perms?.[role]?.[tab] ?? 'none';
                   const key = `${role}:${tab}`;
+                  const level: AccessLevel = pending[key] ?? perms?.[role]?.[tab] ?? 'none';
+                  const dirty = key in pending;
                   return (
                     <td key={tab} className="px-4 py-2 text-center">
-                      <select value={level} disabled={saving === key}
-                        onChange={e => setAccessLevel(role, tab, e.target.value as AccessLevel)}
-                        className="border border-gray-300 rounded px-1.5 py-1 text-xs disabled:opacity-50">
+                      <select value={level} disabled={saving}
+                        onChange={e => stageAccessLevel(role, tab, e.target.value as AccessLevel)}
+                        className={`border rounded px-1.5 py-1 text-xs disabled:opacity-50 ${dirty ? 'border-amber-400 bg-amber-50' : 'border-gray-300'}`}>
                         <option value="none">None</option>
                         <option value="read">Read</option>
                         <option value="write">Read/Write</option>
@@ -430,6 +452,19 @@ function PermissionsTab() {
           </tbody>
         </table>
       </div>
+
+      {pendingCount > 0 && (
+        <div className="flex items-center gap-3">
+          <button onClick={saveChanges} disabled={saving}
+            className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+            <Save className="w-3.5 h-3.5" /> {saving ? 'Saving…' : `Save Changes (${pendingCount})`}
+          </button>
+          <button onClick={discardChanges} disabled={saving}
+            className="px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50">
+            Discard
+          </button>
+        </div>
+      )}
 
       {addingRole ? (
         <div className="flex items-center gap-2">
@@ -468,21 +503,44 @@ function LinkPermissionsPanel({ roles, tabPerms }: { roles: string[]; tabPerms: 
 
   const [role, setRole] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
-  const [saving, setSaving] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  // Edits are staged here (keyed "role:tab:link_path") and only sent to the
+  // server when Save is clicked. Kept across a role switch so nothing is
+  // silently lost while looking at another role's links.
+  const [pending, setPending] = useState<Record<string, AccessLevel>>({});
+  const pendingCount = Object.keys(pending).length;
 
   const selectedRole = role || roles[0] || '';
   const grantedTabs = Object.keys(TAB_CONFIG).filter(t => (tabPerms[selectedRole]?.[t] ?? 'none') !== 'none');
 
-  const setLinkAccessLevel = async (tab: string, link_path: string, access_level: AccessLevel) => {
-    const key = `${selectedRole}:${tab}:${link_path}`;
-    setSaving(key);
-    await fetch(`${BASE}/api/auth/link-permissions`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', ...authHeader() },
-      body: JSON.stringify({ role: selectedRole, tab, link_path, access_level }),
-    });
-    await refetch();
-    setSaving(null);
+  const stageLinkAccessLevel = (tab: string, link_path: string, access_level: AccessLevel) => {
+    setPending(p => ({ ...p, [`${selectedRole}:${tab}:${link_path}`]: access_level }));
+  };
+
+  const discardChanges = () => setPending({});
+
+  const saveChanges = async () => {
+    setSaving(true);
+    setError('');
+    try {
+      for (const [key, access_level] of Object.entries(pending)) {
+        const [role, tab, link_path] = key.split(':');
+        const res = await fetch(`${BASE}/api/auth/link-permissions`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json', ...authHeader() },
+          body: JSON.stringify({ role, tab, link_path, access_level }),
+        });
+        if (!res.ok) { const e = await res.json(); throw new Error(e.error ?? 'Failed to update'); }
+      }
+      setPending({});
+      await refetch();
+    } catch (err: any) {
+      setError(err.message ?? 'Failed to save changes');
+    } finally {
+      setSaving(false);
+    }
   };
 
   if (!roles.length) return null;
@@ -505,11 +563,16 @@ function LinkPermissionsPanel({ roles, tabPerms }: { roles: string[]; tabPerms: 
         <p className="text-xs text-gray-400">This role has no tabs granted above yet.</p>
       )}
 
+      {error && <p className="text-xs text-red-600">{error}</p>}
+
       <div className="max-w-xl divide-y divide-gray-100 border border-gray-200 rounded-lg bg-white overflow-hidden">
         {grantedTabs.map(tab => {
           const isOpen = expanded[tab] ?? false;
           const links = TAB_CONFIG[tab].links;
-          const allowedCount = links.filter(l => (linkPerms?.[selectedRole]?.[tab]?.[l.to] ?? 'none') !== 'none').length;
+          const allowedCount = links.filter(l => {
+            const key = `${selectedRole}:${tab}:${l.to}`;
+            return (pending[key] ?? linkPerms?.[selectedRole]?.[tab]?.[l.to] ?? 'none') !== 'none';
+          }).length;
           return (
             <div key={tab}>
               <button onClick={() => setExpanded(e => ({ ...e, [tab]: !isOpen }))}
@@ -525,14 +588,15 @@ function LinkPermissionsPanel({ roles, tabPerms }: { roles: string[]; tabPerms: 
               {isOpen && (
                 <div className="px-4 pb-2 pl-9 space-y-1.5">
                   {links.map(link => {
-                    const level: AccessLevel = linkPerms?.[selectedRole]?.[tab]?.[link.to] ?? 'none';
                     const key = `${selectedRole}:${tab}:${link.to}`;
+                    const level: AccessLevel = pending[key] ?? linkPerms?.[selectedRole]?.[tab]?.[link.to] ?? 'none';
+                    const dirty = key in pending;
                     return (
                       <div key={link.to} className="flex items-center justify-between gap-2 text-sm text-gray-600 py-0.5">
                         <span>{link.label}</span>
-                        <select value={level} disabled={saving === key}
-                          onChange={e => setLinkAccessLevel(tab, link.to, e.target.value as AccessLevel)}
-                          className="border border-gray-300 rounded px-1.5 py-0.5 text-xs disabled:opacity-50">
+                        <select value={level} disabled={saving}
+                          onChange={e => stageLinkAccessLevel(tab, link.to, e.target.value as AccessLevel)}
+                          className={`border rounded px-1.5 py-0.5 text-xs disabled:opacity-50 ${dirty ? 'border-amber-400 bg-amber-50' : 'border-gray-300'}`}>
                           <option value="none">None</option>
                           <option value="read">Read</option>
                           <option value="write">Read/Write</option>
@@ -546,6 +610,19 @@ function LinkPermissionsPanel({ roles, tabPerms }: { roles: string[]; tabPerms: 
           );
         })}
       </div>
+
+      {pendingCount > 0 && (
+        <div className="flex items-center gap-3">
+          <button onClick={saveChanges} disabled={saving}
+            className="flex items-center gap-1.5 px-4 py-1.5 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700 disabled:opacity-50">
+            <Save className="w-3.5 h-3.5" /> {saving ? 'Saving…' : `Save Changes (${pendingCount})`}
+          </button>
+          <button onClick={discardChanges} disabled={saving}
+            className="px-3 py-1.5 border border-gray-300 rounded text-sm hover:bg-gray-50 disabled:opacity-50">
+            Discard
+          </button>
+        </div>
+      )}
     </div>
   );
 }

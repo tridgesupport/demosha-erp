@@ -269,13 +269,23 @@ export default function App() {
     );
   }
 
+  // The shared Filters panel (Buyer/Agent/PI#/sales Status/etc.) is only
+  // actually wired up on pages that read from useFiltersContext (Orders,
+  // Customers, Dashboard) — showing it anywhere else is dead UI with fields
+  // that don't apply to that page's own columns and don't affect its query
+  // (e.g. it used to show a "Customer/Buyer" filter on Purchase Orders,
+  // which has suppliers, not buyers, and never read that filter at all).
+  // Those other pages own their own filter controls inline instead.
   const hideFilterBar = location.pathname.startsWith('/settings') ||
     location.pathname === '/orders/new' ||
     location.pathname.match(/^\/orders\/.+\/edit$/) ||
-    location.pathname === '/purchase/indents/new' ||
-    location.pathname === '/purchase/orders/new' ||
+    location.pathname.startsWith('/purchase/indents') ||
+    location.pathname.startsWith('/purchase/orders') ||
     location.pathname === '/purchase/stock-levels' ||
     location.pathname === '/purchase/vendors' ||
+    location.pathname === '/purchase/creditors' ||
+    location.pathname === '/sales/debtors' ||
+    location.pathname === '/catalog/products' ||
     location.pathname.startsWith('/production') ||
     location.pathname.startsWith('/analytics') ||
     location.pathname === '/dispatch/schedules';

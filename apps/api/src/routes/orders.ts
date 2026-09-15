@@ -31,7 +31,8 @@ router.get('/', filtersMiddleware, async (req: Request, res: Response) => {
           o.invoiced_at, o.dispatched_at,
           o.status_changed_at, o.status_changed_by,
           fy.fy_label,
-          COUNT(ol.line_id)::int AS line_count
+          COUNT(ol.line_id)::int AS line_count,
+          COALESCE(SUM(ol.qty_kg), 0) AS total_qty_kg
         FROM sales_orders o
         LEFT JOIN customers          b  ON b.customer_id  = o.buyer_id
         LEFT JOIN customers          c  ON c.customer_id  = o.consignee_id

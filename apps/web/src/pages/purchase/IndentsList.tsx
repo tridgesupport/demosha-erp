@@ -44,6 +44,7 @@ export default function IndentsList() {
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
+  const [status, setStatus] = useState('');
   const [sortKey, setSortKey] = useState<SortKey>('indent_date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -52,6 +53,10 @@ export default function IndentsList() {
   const { data: fyList = [] } = useQuery({ queryKey: ['financial-years'], queryFn: fetchFinancialYears });
   const currentFy: any = (fyList as any[]).find((f: any) => f.is_current) ?? (fyList as any[])[0];
   const [fyKey, setFyKey] = useState<number | null>(null);
+  // Default to the current financial year as soon as it's known, rather
+  // than relying on a fallback at query time — that left a brief window on
+  // first load where the list query went out with no FY filter at all.
+  useEffect(() => { if (currentFy && fyKey === null) setFyKey(currentFy.fy_key); }, [currentFy]);
 
   const { data, isLoading } = usePurchaseIndents({ fyKey: fyKey ?? currentFy?.fy_key, page });
   const rows: any[] = data?.data ?? [];
@@ -65,6 +70,7 @@ export default function IndentsList() {
 
   const displayed = useMemo(() => [...rows]
     .filter((r) => {
+      if (status && r.status !== status) return false;
       if (!search) return true;
       const q = search.toLowerCase();
       return r.indent_number?.toLowerCase().includes(q) || r.indent_for?.toLowerCase().includes(q);
@@ -74,7 +80,7 @@ export default function IndentsList() {
       const bv = b[sortKey] ?? '';
       const cmp = String(av).localeCompare(String(bv), undefined, { numeric: true });
       return sortDir === 'asc' ? cmp : -cmp;
-    }), [rows, search, sortKey, sortDir]);
+    }), [rows, search, status, sortKey, sortDir]);
 
   const toggleSort = (key: SortKey) => {
     if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -165,6 +171,19 @@ export default function IndentsList() {
             <option key={fy.fy_key} value={fy.fy_key}>{fy.fy_label}</option>
           ))}
         </select>
+        <select
+          value={status}
+          onChange={(e) => setStatus(e.target.value)}
+          className="border border-gray-300 rounded px-2 py-1.5 text-sm"
+        >
+          <option value="">All statuses</option>
+          {Object.entries(INDENT_STATUS_LABELS).map(([s, label]) => <option key={s} value={s}>{label}</option>)}
+        </select>
+        {status && (
+          <button onClick={() => setStatus('')} className="text-xs text-gray-500 hover:text-red-600 underline">
+            Clear status
+          </button>
+        )}
       </div>
 
       {canWrite && selectedIds.size > 0 && (

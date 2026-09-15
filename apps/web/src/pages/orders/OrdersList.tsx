@@ -1,21 +1,58 @@
-import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback, Fragment } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useFiltersContext } from '@/context/FiltersContext';
 import { useCanWrite } from '@/context/AuthContext';
-import { useOrders } from '@/hooks/useOrders';
+import { useOrders, useOrder } from '@/hooks/useOrders';
 import { fetchOrders, updateOrderStatus } from '@/lib/api';
 import { formatINR } from '@/lib/calculations';
 import { STATUSES, STATUS_LABELS } from '@/components/FilterBar';
 import StatusBadge from '@/components/StatusBadge';
 import CustomerCombobox from '@/components/CustomerCombobox';
-import { Plus, Download, ChevronUp, ChevronDown, AlertTriangle } from 'lucide-react';
+import { Plus, Download, ChevronUp, ChevronDown, ChevronRight, AlertTriangle } from 'lucide-react';
 
 // Server page-size cap (see GET /api/orders) — used to page through every
 // matching row when exporting "all", not just what's on screen.
 const EXPORT_PAGE_SIZE = 200;
 
-type SortKey = 'pi_number' | 'order_date' | 'buyer_name' | 'agent_name' | 'total_amount' | 'status' | 'submitted_at';
+type SortKey = 'pi_number' | 'order_date' | 'buyer_name' | 'agent_name' | 'total_qty_kg' | 'total_amount' | 'status' | 'submitted_at';
+
+// Expanded-row detail: fetched on demand (only while this row is expanded)
+// rather than upfront for every row in the list.
+function OrderLinesExpansion({ orderId }: { orderId: string }) {
+  const { data: order, isLoading } = useOrder(orderId);
+  const lines: any[] = order?.lines ?? [];
+  return (
+    <tr>
+      <td colSpan={20} className="px-0 py-0 bg-gray-50/70">
+        {isLoading ? (
+          <div className="px-8 py-3 text-xs text-gray-400">Loading line items…</div>
+        ) : (
+          <table className="w-full text-xs">
+            <thead className="text-gray-400">
+              <tr>
+                <th className="px-8 py-1.5 text-left font-medium">Item</th>
+                <th className="px-4 py-1.5 text-right font-medium w-28">Qty (kg)</th>
+                <th className="px-4 py-1.5 text-right font-medium w-32">Amount</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {lines.length === 0 ? (
+                <tr><td colSpan={3} className="px-8 py-2 text-gray-400">No line items</td></tr>
+              ) : lines.map((l: any, i: number) => (
+                <tr key={i}>
+                  <td className="px-8 py-1.5 whitespace-pre-wrap">{l.full_description}</td>
+                  <td className="px-4 py-1.5 text-right">{Number(l.qty_kg).toLocaleString('en-IN')}</td>
+                  <td className="px-4 py-1.5 text-right font-medium">{formatINR(l.line_amount)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </td>
+    </tr>
+  );
+}
 
 // Bulk actions available from the list — each is the same PATCH
 // /:id/status transition the Orders Detail page's own buttons trigger,
@@ -48,6 +85,7 @@ export default function OrdersList() {
   const [piSearch, setPiSearch] = useState(filters.piNumber ?? '');
   const [sortKey, setSortKey] = useState<SortKey>('order_date');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => {
@@ -156,13 +194,13 @@ export default function OrdersList() {
   };
 
   const downloadCsv = (list: any[], filename: string) => {
-    const headers = ['PI#', 'FY', 'Date', 'Buyer', 'Consignee', 'Agent', 'Total (INR)', 'Status', 'Updated', 'Lines'];
+    const headers = ['PI#', 'FY', 'Date', 'Buyer', 'Consignee', 'Agent', 'Total Qty (kg)', 'Total (INR)', 'Status', 'Updated', 'Lines'];
     const csvRows = [
       headers.join(','),
       ...list.map((o) =>
         [
           o.part_suffix ? `${o.pi_number}-${o.part_suffix}` : o.pi_number, o.fy_label, o.order_date, `"${o.buyer_name}"`, `"${o.consignee_name}"`,
-          `"${o.agent_name}"`, o.total_amount, o.status,
+          `"${o.agent_name}"`, o.total_qty_kg ?? 0, o.total_amount, o.status,
           o.status_changed_at ? new Date(o.status_changed_at).toLocaleString() : '',
           o.line_count,
         ].join(',')
@@ -366,6 +404,7 @@ export default function OrdersList() {
           <table className="w-full text-sm">
             <thead>
               <tr className="bg-gray-50 border-b text-xs text-gray-500 uppercase">
+                <th className="px-2 py-2 w-6"></th>
                 <th className="px-4 py-2 w-8">
                   <input
                     type="checkbox"
@@ -381,6 +420,7 @@ export default function OrdersList() {
                   ['buyer_name', 'Buyer'],
                   ['consignee_name', 'Consignee'],
                   ['agent_name', 'Agent'],
+                  ['total_qty_kg', 'Total Qty (kg)'],
                   ['total_amount', 'Total (INR)'],
                   ['status', 'Status'],
                   ['submitted_at', 'Status Date'],
@@ -400,24 +440,29 @@ export default function OrdersList() {
               {isLoading ? (
                 [...Array(10)].map((_, i) => (
                   <tr key={i}>
-                    <td colSpan={10} className="px-4 py-3">
+                    <td colSpan={12} className="px-4 py-3">
                       <div className="h-4 bg-gray-200 rounded animate-pulse" />
                     </td>
                   </tr>
                 ))
               ) : displayed.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="px-4 py-8 text-center text-gray-400">
+                  <td colSpan={12} className="px-4 py-8 text-center text-gray-400">
                     No orders found
                   </td>
                 </tr>
               ) : (
-                displayed.map((o) => (
+                displayed.map((o) => {
+                  const isOpen = expandedId === o.order_id;
+                  return (
+                  <Fragment key={o.order_id}>
                   <tr
-                    key={o.order_id}
                     className={`hover:bg-blue-50 cursor-pointer ${selectedIds.has(o.order_id) ? 'bg-blue-50/60' : ''}`}
                     onClick={() => navigate(`/orders/${o.order_id}`)}
                   >
+                    <td className="px-2 py-2.5" onClick={(e) => { e.stopPropagation(); setExpandedId(isOpen ? null : o.order_id); }}>
+                      <ChevronRight className={`w-4 h-4 text-gray-400 transition-transform ${isOpen ? 'rotate-90' : ''}`} />
+                    </td>
                     <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
                       <input
                         type="checkbox"
@@ -436,6 +481,7 @@ export default function OrdersList() {
                     <td className="px-4 py-2.5 font-medium text-gray-800">{o.buyer_name}</td>
                     <td className="px-4 py-2.5 text-gray-600">{o.consignee_name ?? '—'}</td>
                     <td className="px-4 py-2.5 text-gray-600">{o.agent_name ?? '—'}</td>
+                    <td className="px-4 py-2.5 text-right text-gray-600">{Number(o.total_qty_kg ?? 0).toLocaleString('en-IN')}</td>
                     <td className="px-4 py-2.5 text-right font-medium">{formatINR(o.total_amount)}</td>
                     <td className="px-4 py-2.5"><StatusBadge status={o.status} /></td>
                     <td className="px-4 py-2.5 text-gray-500 whitespace-nowrap text-xs">
@@ -469,7 +515,10 @@ export default function OrdersList() {
                     </td>
                     <td className="px-4 py-2.5 text-right text-gray-500">{o.line_count}</td>
                   </tr>
-                ))
+                  {isOpen && <OrderLinesExpansion orderId={o.order_id} />}
+                  </Fragment>
+                  );
+                })
               )}
             </tbody>
           </table>

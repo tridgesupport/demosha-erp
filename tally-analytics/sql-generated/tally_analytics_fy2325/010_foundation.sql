@@ -40,6 +40,28 @@ LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
   SELECT to_char(d, 'YYYY-MM');
 $$;
 
+-- Bare integer versions of the above, for Looker Studio-style charts that
+-- want to sort/group/filter on a plain number rather than parse a label.
+CREATE OR REPLACE FUNCTION tally_analytics_fy2325.fiscal_quarter_number(d date)
+RETURNS int
+LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+  SELECT CASE
+      WHEN extract(month FROM d) IN (4,5,6)    THEN 1
+      WHEN extract(month FROM d) IN (7,8,9)    THEN 2
+      WHEN extract(month FROM d) IN (10,11,12) THEN 3
+      ELSE 4
+    END;
+$$;
+
+-- Month position within the fiscal year: April = 1 ... March = 12 (so
+-- ordering by this sorts correctly across the Apr-Mar year, unlike the
+-- calendar month number).
+CREATE OR REPLACE FUNCTION tally_analytics_fy2325.fiscal_month_number(d date)
+RETURNS int
+LANGUAGE sql IMMUTABLE PARALLEL SAFE AS $$
+  SELECT ((extract(month FROM d)::int + 8) % 12) + 1;
+$$;
+
 -- ------------------------------------------------------------
 -- Dimension: chart-of-accounts groups
 -- ------------------------------------------------------------

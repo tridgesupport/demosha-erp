@@ -1,0 +1,27 @@
+name: Refresh analytics views
+
+on:
+  schedule:
+    # 04:45 UTC = 10:15 IST — after the morning manual Tally sync (usually done before 10am IST)
+    - cron: "45 4 * * *"
+  workflow_dispatch: {}
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install dependencies
+        working-directory: tally-analytics/refresh
+        run: npm install
+
+      - name: Refresh materialized views
+        working-directory: tally-analytics/refresh
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: node refresh_materialized_views.mjs

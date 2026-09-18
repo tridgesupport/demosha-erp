@@ -555,7 +555,7 @@ router.get('/periods', async (_req: Request, res: Response) => {
 
 // ------------------------------------------------------------
 // Refresh — brings the materialized views up to date after a new Tally
-// sync. All four together run in a few seconds (verified), so this is a
+// sync. All of them together run in a few seconds (verified), so this is a
 // plain synchronous request/response, not a background job.
 // ------------------------------------------------------------
 // `tally_analytics` itself (the combined, multi-year layer the app
@@ -569,6 +569,7 @@ const MATERIALIZED_VIEWS = [
   'v_purchase_invoice_fact',
   'v_ledger_period_balance',
   'v_inventory_period_balance',
+  'v_cost_fact',
 ] as const;
 
 router.post('/refresh', requireAuth, async (_req: Request, res: Response) => {

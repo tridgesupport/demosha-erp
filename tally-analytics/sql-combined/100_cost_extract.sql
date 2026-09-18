@@ -21,3 +21,11 @@ SELECT cost_category, ledger, is_direct, cost_type, fiscal_year, fiscal_quarter,
        COUNT(DISTINCT guid) AS voucher_count, SUM(cost_amount) AS cost_amount
 FROM tally_analytics.v_cost_fact
 GROUP BY cost_category, ledger, is_direct, cost_type, fiscal_year, fiscal_quarter, month_label;
+
+CREATE OR REPLACE VIEW tally_analytics.v_cost_by_item_period AS
+SELECT item, stock_group, stock_category, fiscal_year, fiscal_quarter, month_label,
+       SUM(quantity) AS quantity, SUM(cost_amount) AS cost_amount,
+       CASE WHEN SUM(quantity) <> 0 THEN SUM(cost_amount) / SUM(quantity) END AS avg_rate
+FROM tally_analytics.v_cost_fact
+WHERE item IS NOT NULL
+GROUP BY item, stock_group, stock_category, fiscal_year, fiscal_quarter, month_label;

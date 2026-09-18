@@ -163,6 +163,21 @@ hiding them.
    going; a real cash flow statement needs an accountant's judgment calls
    this can't fully automate.
 
+7. **Purchase Accounts: item-level total doesn't exactly match the
+   ledger-level total, by ~0.5-1%.** `v_purchase_item_fact` (built from
+   `trn_inventory`, per stock item) and `v_purchase_invoice_fact`
+   (built from `trn_accounting`, per ledger) were always computed
+   independently and were never cross-checked against each other before
+   `v_cost_fact` (100) combined the two ideas into one view. The gap runs
+   both directions across the three year-schemas (item-level higher in
+   two years, lower in the third) and is small enough to be GST
+   rounding/apportionment rather than a missed voucher. `v_cost_fact`'s
+   Purchase Accounts rows are item-level (to carry quantity/rate), so its
+   Purchase Accounts total (and `v_cost_by_category_period`'s, which is
+   just a rollup of it) will show this same small gap against
+   `v_purchase_invoice_fact.purchase_value` — use that view instead if you
+   need the ledger-exact figure rather than the per-item breakdown.
+
 ## View catalog
 
 **Foundation**
@@ -185,7 +200,7 @@ hiding them.
 
 **Cash Flow** — `v_cash_flow_fact`, `v_cash_flow_summary_period` (see finding #5).
 
-**Cost extract (Looker Studio)** — `v_cost_fact` (one row per Expense-side P&L accounting line — Purchase Accounts plus every direct/indirect expense such as salary, rent, depreciation — regardless of voucher type, with vendor/vendor_state/vendor_gstn and plain-integer year/month/quarter fields for charting), plus `v_cost_by_vendor_period` and `v_cost_by_category_period` rollups. Broader than Purchase — see `v_purchase_*` above for Purchase-voucher-only detail.
+**Cost extract (Looker Studio)** — `v_cost_fact` (one row per cost line on the Expense side of the P&L — Purchase Accounts plus every direct/indirect expense such as salary, rent, depreciation — regardless of voucher type, with vendor/vendor_state/vendor_gstn and plain-integer year/month/quarter fields for charting). Purchase Accounts rows are item-level with quantity/rate/uom populated (see finding #7 for a small known gap vs. the ledger-level Purchase total); every other cost category has no unit concept and those fields are NULL. Rollups: `v_cost_by_vendor_period`, `v_cost_by_category_period`, `v_cost_by_item_period` (unit-price trend per item). Broader than Purchase — see `v_purchase_*` above for Purchase-voucher-only detail.
 
 **Inventory** — `v_inventory_current` (exact, use this for "what's in stock now"), `v_inventory_movement_fact` (transaction log), `v_inventory_period_balance` (trend, approximate — see finding #4), `v_inventory_by_group_period`.
 

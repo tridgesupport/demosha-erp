@@ -432,44 +432,6 @@ export const uploadLogsheetPdf = (logsheetId: string, file: Blob) => {
   return fetch(`${BASE_URL}/api/production/logsheets/${logsheetId}/upload-pdf`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(r => r.json());
 };
 
-export interface AnalyticalRegisterFilters {
-  dateFrom?: string;
-  dateTo?: string;
-  grade?: string;
-  zincUsed?: string;
-  page?: number;
-}
-
-function analyticalRegisterQuery(params?: AnalyticalRegisterFilters): string {
-  const p = new URLSearchParams();
-  if (params?.dateFrom) p.set('dateFrom', params.dateFrom);
-  if (params?.dateTo)   p.set('dateTo',   params.dateTo);
-  if (params?.grade)    p.set('grade',    params.grade);
-  if (params?.zincUsed) p.set('zincUsed', params.zincUsed);
-  if (params?.page)     p.set('page',     String(params.page));
-  return p.toString();
-}
-
-export const fetchAnalyticalRegister = (params?: AnalyticalRegisterFilters) => {
-  const qs = analyticalRegisterQuery(params);
-  return request(`/api/production/analytical-register${qs ? `?${qs}` : ''}`);
-};
-
-export const fetchAnalyticalRegisterSummary = (params?: Omit<AnalyticalRegisterFilters, 'page'>) => {
-  const qs = analyticalRegisterQuery(params);
-  return request(`/api/production/analytical-register/summary${qs ? `?${qs}` : ''}`);
-};
-
-export const uploadAnalyticalRegister = (file: File) => {
-  const fd = new FormData();
-  fd.append('file', file, file.name);
-  return fetch(`${BASE_URL}/api/production/analytical-register/upload`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(async r => {
-    const body = await r.json();
-    if (!r.ok) throw new Error(body?.error || 'Upload failed');
-    return body;
-  });
-};
-
 // SFS Analytical Report (batch-wise, date-wise; PDF is scanned, so upload
 // only kicks off an async extraction job — poll fetchSfsUploadStatus for it).
 export interface SfsAnalyticalRegisterFilters {
@@ -513,6 +475,43 @@ export const uploadSfsAnalyticalReport = (file: File) => {
 
 export const fetchSfsUploadStatus = (uploadId: string) =>
   request(`/api/production/sfs/analytical-register/uploads/${uploadId}`);
+
+// Daily production reports for SHS / ZFS / ZnO (PDF is scanned, so upload only
+// kicks off an async extraction job on GitHub Actions; poll the upload status).
+// Same flow as the SFS report above, served by routes/production_reports.ts.
+export type ProductReportKey = 'shs' | 'zfs' | 'zno';
+
+export interface ProductionReportFilters {
+  dateFrom?: string;
+  dateTo?: string;
+  batchNo?: string;
+  purityMin?: string;
+  purityMax?: string;
+  zincBrand?: string;   // SHS
+  clarity?: string;     // ZFS
+  kiln?: string;        // ZnO: OLD | NEW
+  page?: number;
+}
+
+export const fetchProductionReport = (product: ProductReportKey, params?: ProductionReportFilters) => {
+  const p = new URLSearchParams();
+  Object.entries(params ?? {}).forEach(([k, v]) => { if (v !== undefined && v !== null && v !== '') p.set(k, String(v)); });
+  const qs = p.toString();
+  return request(`/api/production/reports/${product}${qs ? `?${qs}` : ''}`);
+};
+
+export const uploadProductionReport = (product: ProductReportKey, file: File) => {
+  const fd = new FormData();
+  fd.append('file', file, file.name);
+  return fetch(`${BASE_URL}/api/production/reports/${product}/upload`, { method: 'POST', headers: getAuthHeader(), body: fd }).then(async r => {
+    const body = await r.json();
+    if (!r.ok) throw new Error(body?.error || 'Upload failed');
+    return body as { uploadId: string; status: string };
+  });
+};
+
+export const fetchProductionUploadStatus = (product: ProductReportKey, uploadId: string) =>
+  request(`/api/production/reports/${product}/uploads/${uploadId}`);
 
 // Catalogue SKUs
 export const fetchSkus = (search?: string) => {

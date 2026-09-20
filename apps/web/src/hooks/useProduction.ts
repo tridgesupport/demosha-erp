@@ -2,10 +2,11 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   fetchProductionProducts, fetchLogsheets, fetchLogsheet,
   createLogsheet, updateLogsheetSection, updateLogsheetStatus,
-  bulkApproveLogsheets, fetchAnalyticalRegister, uploadAnalyticalRegister,
-  fetchAnalyticalRegisterSummary, AnalyticalRegisterFilters,
+  bulkApproveLogsheets,
   fetchSfsAnalyticalRegister, uploadSfsAnalyticalReport, fetchSfsUploadStatus,
   SfsAnalyticalRegisterFilters,
+  fetchProductionReport, uploadProductionReport, fetchProductionUploadStatus,
+  ProductReportKey, ProductionReportFilters,
 } from '@/lib/api';
 
 export function useProductionProducts() {
@@ -67,28 +68,6 @@ export function useBulkApproveLogsheets() {
   });
 }
 
-export function useAnalyticalRegister(params?: AnalyticalRegisterFilters) {
-  return useQuery({
-    queryKey: ['analytical-register', params],
-    queryFn: () => fetchAnalyticalRegister(params) as Promise<{ data: any[]; total: number; page: number; limit: number }>,
-  });
-}
-
-export function useAnalyticalRegisterSummary(params?: Omit<AnalyticalRegisterFilters, 'page'>) {
-  return useQuery({
-    queryKey: ['analytical-register-summary', params],
-    queryFn: () => fetchAnalyticalRegisterSummary(params) as Promise<{ totals: any; byDate: any[]; byDateGrade: any[]; byGrade: any[] }>,
-  });
-}
-
-export function useUploadAnalyticalRegister() {
-  const qc = useQueryClient();
-  return useMutation({
-    mutationFn: (file: File) => uploadAnalyticalRegister(file),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['analytical-register'] }),
-  });
-}
-
 // ─── SFS Analytical Report ─────────────────────────────────────────────────────
 
 export function useSfsAnalyticalRegister(params?: SfsAnalyticalRegisterFilters) {
@@ -111,6 +90,34 @@ export function useSfsUploadStatus(uploadId: string | null) {
   return useQuery({
     queryKey: ['sfs-upload-status', uploadId],
     queryFn: () => fetchSfsUploadStatus(uploadId!) as Promise<{ status: string; rows_upserted: number | null; error_message: string | null }>,
+    enabled: !!uploadId,
+    refetchInterval: (query) => {
+      const status = query.state.data?.status;
+      return status === 'pending' || status === 'processing' ? 4000 : false;
+    },
+  });
+}
+
+// ─── SHS / ZFS / ZnO daily reports ─────────────────────────────────────────────
+
+export function useProductionReport(product: ProductReportKey, params?: ProductionReportFilters) {
+  return useQuery({
+    queryKey: ['production-report', product, params],
+    queryFn: () => fetchProductionReport(product, params) as Promise<{ data: any[]; total: number; page: number; limit: number }>,
+  });
+}
+
+export function useUploadProductionReport(product: ProductReportKey) {
+  return useMutation({
+    mutationFn: (file: File) => uploadProductionReport(product, file),
+  });
+}
+
+// Polls the extraction job's status every 4s while it is still pending (see useSfsUploadStatus).
+export function useProductionUploadStatus(product: ProductReportKey, uploadId: string | null) {
+  return useQuery({
+    queryKey: ['production-upload-status', product, uploadId],
+    queryFn: () => fetchProductionUploadStatus(product, uploadId!) as Promise<{ status: string; rows_upserted: number | null; error_message: string | null }>,
     enabled: !!uploadId,
     refetchInterval: (query) => {
       const status = query.state.data?.status;

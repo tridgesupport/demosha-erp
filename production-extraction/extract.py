@@ -9,16 +9,23 @@ Usage: python extract.py --upload-id <uuid>
 """
 
 import argparse
+import inspect
 import sys
 import tempfile
 from pathlib import Path
 
 import requests
 
-from db import connect, get_upload, mark_upload_status, upsert_sfs_rows
+from db import (
+    connect, get_upload, mark_upload_status,
+    upsert_sfs_rows, upsert_shs_rows, upsert_zfs_rows, upsert_zno_rows,
+)
 
 EXTRACTORS = {
     "SFS": ("extract_sfs", "upsert_sfs"),
+    "SHS": ("extract_shs", "upsert_shs"),
+    "ZFS": ("extract_zfs", "upsert_zfs"),
+    "ZNO": ("extract_zno", "upsert_zno"),
 }
 
 
@@ -29,8 +36,30 @@ def upsert_sfs(cur, upload, rows):
     return upsert_sfs_rows(cur, rows)
 
 
+def _stamp(upload, rows):
+    for r in rows:
+        r.setdefault("source_file", upload["file_name"])
+        r.setdefault("uploaded_by", upload["uploaded_by"])
+    return rows
+
+
+def upsert_shs(cur, upload, rows):
+    return upsert_shs_rows(cur, _stamp(upload, rows))
+
+
+def upsert_zfs(cur, upload, rows):
+    return upsert_zfs_rows(cur, _stamp(upload, rows))
+
+
+def upsert_zno(cur, upload, rows):
+    return upsert_zno_rows(cur, _stamp(upload, rows))
+
+
 UPSERTERS = {
     "upsert_sfs": upsert_sfs,
+    "upsert_shs": upsert_shs,
+    "upsert_zfs": upsert_zfs,
+    "upsert_zno": upsert_zno,
 }
 
 
@@ -63,19 +92,28 @@ def main():
             pdf_path.write_bytes(resp.content)
 
             try:
-                result = extractor.extract(str(pdf_path))
+                # Newer extractors also take the upload's file name (a hint for
+                # multi-day PDFs whose printed dates can be misread).
+                if "file_name" in inspect.signature(extractor.extract).parameters:
+                    result = extractor.extract(str(pdf_path), file_name=upload["file_name"])
+                else:
+                    result = extractor.extract(str(pdf_path))
             except Exception as exc:  # noqa: BLE001 — always record the failure on the upload row
                 with conn.cursor() as cur:
                     mark_upload_status(cur, upload["upload_id"], "failed", error_message=str(exc))
                 conn.commit()
                 sys.exit(f"Extraction failed: {exc}")
 
-            for w in result.get("warnings", []):
+            warnings = result.get("warnings", [])
+            for w in warnings:
                 print(f"WARNING: {w}")
 
             with conn.cursor() as cur:
                 rows_upserted = UPSERTERS[upserter_name](cur, upload, result["rows"])
-                mark_upload_status(cur, upload["upload_id"], "done", rows_upserted=rows_upserted)
+                # Warnings ride along on the "done" row so the page can tell the
+                # user which numbers to double-check.
+                mark_upload_status(cur, upload["upload_id"], "done", rows_upserted=rows_upserted,
+                                   error_message=("; ".join(warnings)[:1500] or None))
             conn.commit()
             print(f"Upserted {rows_upserted} row(s) for upload {upload['upload_id']}.")
     finally:

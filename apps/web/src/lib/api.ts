@@ -592,3 +592,20 @@ export const fetchAnalyticsPeriods = (): Promise<{ period_type: Granularity; per
 // the Balance Sheet/Inventory trend charts, after a new Tally data sync.
 export const refreshAnalyticsData = (): Promise<{ ok: boolean; totalMs: number; refreshedAt: string }> =>
   request('/api/analytics/refresh', { method: 'POST' });
+
+// Data assistant
+export type AssistantTurn = { role: 'user' | 'assistant'; content: string };
+export type AssistantReply = {
+  answer: string;
+  log_id: number;
+  model: string;
+  cost_inr: number;
+  used_saved_answer: boolean;
+  sql: string[];
+};
+
+export const askAssistant = (body: { question: string; history: AssistantTurn[]; deep?: boolean; allow_web?: boolean }) =>
+  request<AssistantReply>('/api/agent/chat', { method: 'POST', body: JSON.stringify(body) });
+
+export const sendAssistantFeedback = (log_id: number, rating: 1 | -1, comment?: string) =>
+  request<{ ok: boolean }>('/api/agent/feedback', { method: 'POST', body: JSON.stringify({ log_id, rating, comment }) });

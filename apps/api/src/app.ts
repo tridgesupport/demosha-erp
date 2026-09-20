@@ -18,6 +18,7 @@ import productionRouter from './routes/production';
 import dispatchSchedulesRouter from './routes/dispatch_schedules';
 import analyticsRouter from './routes/analytics';
 import inventoryRouter from './routes/inventory';
+import agentRouter from './routes/agent';
 
 // Single source of truth for the Express app — shared by the local dev
 // server (index.ts, via app.listen) and the Vercel serverless entrypoint
@@ -162,6 +163,7 @@ app.use('/api/production', productionRouter);
 app.use('/api/dispatch-schedules', dispatchSchedulesRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/inventory', inventoryRouter);
+app.use('/api/agent', agentRouter);
 
 app.get('/', (_req, res) => {
   res.json({ status: 'ok', message: 'Demosha ERP API' });

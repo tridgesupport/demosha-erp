@@ -39,6 +39,7 @@ import RefreshDataButton from '@/components/analytics/RefreshDataButton';
 // users never open it, so its code shouldn't be in everyone else's initial
 // bundle — each of these only downloads the first time someone actually
 // navigates to /analytics/*.
+const Assistant = lazy(() => import('@/pages/Assistant'));
 const SalesAnalysis = lazy(() => import('@/pages/analytics/SalesAnalysis'));
 const PurchaseAnalysis = lazy(() => import('@/pages/analytics/PurchaseAnalysis'));
 const AnalyticsOutstanding = lazy(() => import('@/pages/analytics/Outstanding'));
@@ -122,6 +123,14 @@ export const TAB_CONFIG: Record<string, { label: string; links: { to: string; la
       { to: '/inventory', label: 'Inventory' },
     ],
   },
+  // Not part of the role_tab_permissions system: shown to anyone whose role has data-assistant
+  // scopes on the server (user.agent_access.enabled — see getAllowedTabs below).
+  assistant: {
+    label: 'Ask',
+    links: [
+      { to: '/assistant', label: 'Ask' },
+    ],
+  },
 };
 
 function getActiveTab(pathname: string): string {
@@ -158,8 +167,11 @@ const ROLE_DEFAULTS: Record<string, string[]> = {
   plant_incharge: ['production'],
 };
 
-function getAllowedTabs(user: { allowed_tabs?: string[]; role?: string } | null): string[] {
-  return user?.allowed_tabs?.length ? user.allowed_tabs : (user?.role ? ROLE_DEFAULTS[user.role] ?? [] : []);
+type AccessUser = { allowed_tabs?: string[]; allowed_links?: Record<string, string[]>; role?: string; agent_access?: { enabled: boolean } } | null;
+
+function getAllowedTabs(user: AccessUser): string[] {
+  const base = user?.allowed_tabs?.length ? user.allowed_tabs : (user?.role ? ROLE_DEFAULTS[user.role] ?? [] : []);
+  return user?.agent_access?.enabled && !base.includes('assistant') ? [...base, 'assistant'] : base;
 }
 
 // Sub-links a role can reach within each of its allowed tabs. When falling
@@ -167,8 +179,12 @@ function getAllowedTabs(user: { allowed_tabs?: string[]; role?: string } | null)
 // to granting every link under those tabs — otherwise a role the server
 // hasn't configured yet would read as having zero sub-links and get
 // redirected in circles instead of seeing its default full access.
-function getAllowedLinks(user: { allowed_tabs?: string[]; allowed_links?: Record<string, string[]>; role?: string } | null): Record<string, string[]> {
-  if (user?.allowed_tabs?.length) return user.allowed_links ?? {};
+function getAllowedLinks(user: AccessUser): Record<string, string[]> {
+  if (user?.allowed_tabs?.length) {
+    const links = { ...(user.allowed_links ?? {}) };
+    if (user.agent_access?.enabled) links.assistant = ['/assistant'];
+    return links;
+  }
   const result: Record<string, string[]> = {};
   for (const tab of getAllowedTabs(user)) result[tab] = (TAB_CONFIG[tab]?.links ?? []).map(l => l.to);
   return result;
@@ -288,6 +304,7 @@ export default function App() {
     location.pathname === '/catalog/products' ||
     location.pathname.startsWith('/production') ||
     location.pathname.startsWith('/analytics') ||
+    location.pathname === '/assistant' ||
     location.pathname === '/dispatch/schedules';
 
   const allowed = getAllowedTabs(user);
@@ -420,6 +437,7 @@ export default function App() {
                 <Route path="/production/:productCode" element={<LogsheetList />} />
                 <Route path="/dispatch/schedules" element={<DispatchSchedulesList />} />
                 <Route path="/inventory" element={<InventoryPage />} />
+                <Route path="/assistant" element={<Suspense fallback={<AnalyticsPageLoading />}><Assistant /></Suspense>} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
             </TabGuard>

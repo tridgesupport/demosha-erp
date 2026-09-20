@@ -79,3 +79,101 @@ def upsert_sfs_rows(cur, rows):
     for r in rows:
         cur.execute(SFS_UPSERT_SQL, r)
     return len(rows)
+
+
+# ── SHS daily production report ────────────────────────────────────────────────
+SHS_UPSERT_SQL = """
+    INSERT INTO shs_daily_report
+        (log_date, batch_no, purity_pct, quantity_kgs, yield_ratio, zinc_charged_kgs, zinc_brand,
+         coal_consumption_kgs, shs_batches, sfs_batches, zfs_batches, remarks, source_file, uploaded_by)
+    VALUES
+        (%(log_date)s, %(batch_no)s, %(purity_pct)s, %(quantity_kgs)s, %(yield_ratio)s, %(zinc_charged_kgs)s, %(zinc_brand)s,
+         %(coal_consumption_kgs)s, %(shs_batches)s, %(sfs_batches)s, %(zfs_batches)s, %(remarks)s, %(source_file)s, %(uploaded_by)s)
+    ON CONFLICT (log_date, batch_no) DO UPDATE SET
+        purity_pct           = EXCLUDED.purity_pct,
+        quantity_kgs         = EXCLUDED.quantity_kgs,
+        yield_ratio          = EXCLUDED.yield_ratio,
+        zinc_charged_kgs     = EXCLUDED.zinc_charged_kgs,
+        zinc_brand           = EXCLUDED.zinc_brand,
+        coal_consumption_kgs = EXCLUDED.coal_consumption_kgs,
+        shs_batches          = EXCLUDED.shs_batches,
+        sfs_batches          = EXCLUDED.sfs_batches,
+        zfs_batches          = EXCLUDED.zfs_batches,
+        remarks              = EXCLUDED.remarks,
+        source_file          = EXCLUDED.source_file,
+        uploaded_by          = EXCLUDED.uploaded_by,
+        uploaded_at          = NOW();
+"""
+
+
+def upsert_shs_rows(cur, rows):
+    for r in rows:
+        cur.execute(SHS_UPSERT_SQL, r)
+    return len(rows)
+
+
+# ── ZFS daily production report ────────────────────────────────────────────────
+ZFS_UPSERT_SQL = """
+    INSERT INTO zfs_daily_report
+        (log_date, batch_no, purity_pct, quantity_kgs, yield_ratio, zinc_used_kgs, bulk_density,
+         zinc_brand, anf_unit, clarity, ntu, remarks, source_file, uploaded_by)
+    VALUES
+        (%(log_date)s, %(batch_no)s, %(purity_pct)s, %(quantity_kgs)s, %(yield_ratio)s, %(zinc_used_kgs)s, %(bulk_density)s,
+         %(zinc_brand)s, %(anf_unit)s, %(clarity)s, %(ntu)s, %(remarks)s, %(source_file)s, %(uploaded_by)s)
+    ON CONFLICT (log_date, batch_no) DO UPDATE SET
+        purity_pct    = EXCLUDED.purity_pct,
+        quantity_kgs  = EXCLUDED.quantity_kgs,
+        yield_ratio   = EXCLUDED.yield_ratio,
+        zinc_used_kgs = EXCLUDED.zinc_used_kgs,
+        bulk_density  = EXCLUDED.bulk_density,
+        zinc_brand    = EXCLUDED.zinc_brand,
+        anf_unit      = EXCLUDED.anf_unit,
+        clarity       = EXCLUDED.clarity,
+        ntu           = EXCLUDED.ntu,
+        remarks       = EXCLUDED.remarks,
+        source_file   = EXCLUDED.source_file,
+        uploaded_by   = EXCLUDED.uploaded_by,
+        uploaded_at   = NOW();
+"""
+
+
+def upsert_zfs_rows(cur, rows):
+    for r in rows:
+        cur.execute(ZFS_UPSERT_SQL, r)
+    return len(rows)
+
+
+# ── ZnO daily report (one row per kiln per production date) ───────────────────
+ZNO_UPSERT_SQL = """
+    INSERT INTO zno_daily_report
+        (production_date, report_date, kiln, production_mt, production_text, cumulative_production_mt,
+         gas_consumed, cumulative_gas, gas_per_mt, tds_range, feed_hood_temp_range, ds_hood_temp_range,
+         lots, remarks, source_file, uploaded_by)
+    VALUES
+        (%(production_date)s, %(report_date)s, %(kiln)s, %(production_mt)s, %(production_text)s, %(cumulative_production_mt)s,
+         %(gas_consumed)s, %(cumulative_gas)s, %(gas_per_mt)s, %(tds_range)s, %(feed_hood_temp_range)s, %(ds_hood_temp_range)s,
+         %(lots)s::jsonb, %(remarks)s, %(source_file)s, %(uploaded_by)s)
+    ON CONFLICT (production_date, kiln) DO UPDATE SET
+        report_date              = EXCLUDED.report_date,
+        production_mt            = EXCLUDED.production_mt,
+        production_text          = EXCLUDED.production_text,
+        cumulative_production_mt = EXCLUDED.cumulative_production_mt,
+        gas_consumed             = EXCLUDED.gas_consumed,
+        cumulative_gas           = EXCLUDED.cumulative_gas,
+        gas_per_mt               = EXCLUDED.gas_per_mt,
+        tds_range                = EXCLUDED.tds_range,
+        feed_hood_temp_range     = EXCLUDED.feed_hood_temp_range,
+        ds_hood_temp_range       = EXCLUDED.ds_hood_temp_range,
+        lots                     = EXCLUDED.lots,
+        remarks                  = EXCLUDED.remarks,
+        source_file              = EXCLUDED.source_file,
+        uploaded_by              = EXCLUDED.uploaded_by,
+        uploaded_at              = NOW();
+"""
+
+
+def upsert_zno_rows(cur, rows):
+    import json
+    for r in rows:
+        cur.execute(ZNO_UPSERT_SQL, {**r, "lots": json.dumps(r.get("lots") or [])})
+    return len(rows)

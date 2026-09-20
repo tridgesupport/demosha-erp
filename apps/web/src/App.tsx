@@ -29,8 +29,10 @@ import VendorsList from '@/pages/purchase/VendorsList';
 import LogsheetList from '@/pages/production/LogsheetList';
 import NewLogsheet from '@/pages/production/NewLogsheet';
 import LogsheetDetail from '@/pages/production/LogsheetDetail';
-import AnalyticalRegister from '@/pages/production/AnalyticalRegister';
 import SFS from '@/pages/production/SFS';
+import SHS from '@/pages/production/SHS';
+import ZFS from '@/pages/production/ZFS';
+import ZNO from '@/pages/production/ZNO';
 import DispatchSchedulesList from '@/pages/dispatch/DispatchSchedulesList';
 import InventoryPage from '@/pages/Inventory';
 import RefreshDataButton from '@/components/analytics/RefreshDataButton';
@@ -110,7 +112,6 @@ export const TAB_CONFIG: Record<string, { label: string; links: { to: string; la
     label: 'Production',
     links: [
       { to: '/production/shs', label: 'SHS' },
-      { to: '/production/analytical-register', label: 'SHS Analytical Register' },
       { to: '/production/sfs', label: 'SFS' },
       { to: '/production/zfs', label: 'ZFS' },
       { to: '/production/zno', label: 'ZnO' },
@@ -427,10 +428,10 @@ export default function App() {
                 <Route path="/purchase/orders/:id" element={<PurchaseOrderDetail />} />
                 <Route path="/purchase/vendors" element={<VendorsList />} />
                 <Route path="/purchase/stock-levels" element={<StockLevels />} />
-                <Route path="/production/analytical-register" element={<AnalyticalRegister />} />
+                <Route path="/production/shs" element={<SHS />} />
                 <Route path="/production/sfs" element={<SFS />} />
-                <Route path="/production/zfs" element={<ComingSoon label="ZFS" />} />
-                <Route path="/production/zno" element={<ComingSoon label="ZnO" />} />
+                <Route path="/production/zfs" element={<ZFS />} />
+                <Route path="/production/zno" element={<ZNO />} />
                 <Route path="/production/zinc-dust" element={<ComingSoon label="Zinc Dust" />} />
                 <Route path="/production/:productCode/new" element={<NewLogsheet />} />
                 <Route path="/production/:productCode/:id" element={<LogsheetDetail />} />

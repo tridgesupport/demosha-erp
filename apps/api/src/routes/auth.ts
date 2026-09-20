@@ -5,6 +5,7 @@ import multer from 'multer';
 import { randomBytes } from 'crypto';
 import sql from '../db/client';
 import { requireAuth, requireRole } from '../middleware/auth';
+import { agentAccess } from '../agent/access';
 import { uploadToImagekit } from '../lib/imagekit';
 import { sendSetPasswordEmail } from '../lib/brevo';
 import { TAB_LINKS } from '../lib/tab-links';
@@ -83,6 +84,7 @@ router.post('/login', async (req: Request, res: Response) => {
         allowed_links,
         tab_access,
         link_access,
+        agent_access: await agentAccess(user.role),
         must_change_password: user.must_change_password ?? false,
       },
     });
@@ -116,6 +118,7 @@ router.get('/me', requireAuth, async (req: Request, res: Response) => {
       allowed_links: groupLinksByTab(linkRows as any[]),
       tab_access,
       link_access: groupLinkAccessByTab(linkRows as any[]),
+      agent_access: await agentAccess(rows[0].role),
     });
   } catch (err) {
     res.status(500).json({ error: 'Failed to fetch user' });

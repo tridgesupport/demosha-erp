@@ -14,6 +14,9 @@ export interface AuthUser {
   // default every existing grant got when this was introduced.
   tab_access?: Record<string, 'read' | 'write'>;
   link_access?: Record<string, Record<string, 'read' | 'write'>>;
+  // Set by the server from agent_role_scopes: whether this role may use the data assistant ("Ask" tab),
+  // and whether it may use the Deep analysis / web search options. The server re-checks on every call.
+  agent_access?: { enabled: boolean; deep: boolean; web: boolean };
   must_change_password: boolean;
 }
 

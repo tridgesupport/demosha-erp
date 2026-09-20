@@ -13,6 +13,7 @@ for Claude in a future session that hasn't seen this conversation.
 | **Tally analytics views** | `tally-analytics/{sql,sql-generated,sql-combined}/` | The `tally_analytics` Postgres schema (views, not tables) | ERP **Analytics tab** (`routes/analytics.ts`) **and** Data Studio / Looker Studio dashboards |
 | **Statutory report reconciliation** | `reports/sql/` | Nothing live — one-off, run manually via `psql` | You, checking a number against the audited annual report |
 | **Raw material prices** | `raw-material-prices/` + migrations `016`/`017` | `raw_materials` / `raw_material_prices` tables | Scheduled scrapers (GitHub Actions), queried directly when needed |
+| **Data agent (chat Q&A)** | migrations `028`-`030`, `apps/api/src/agent/`, `db/agentClient.ts`, `lib/sqlGuard.ts` | `agent_*` tables, read-only `agent_*` Postgres roles, curated `agent_api` views | Natural-language agent; runs read-only SQL over `tally_analytics` (+ `agent_api` for sales/ops), scoped by role. Its context is `apps/api/src/agent/context.ts` |
 
 ## 1. ERP operational schema — `apps/api/src/db/migrations/`
 

@@ -8,5 +8,5 @@ export const TAB_LINKS: Record<string, string[]> = {
   management: ['/dispatch/schedules'],
   analytics: ['/analytics/sales', '/analytics/purchase', '/analytics/outstanding', '/analytics/pnl', '/analytics/balance-sheet', '/analytics/cash-flow', '/analytics/inventory'],
   production: ['/production/shs', '/production/sfs', '/production/zfs', '/production/zno', '/production/zinc-dust'],
-  inventory: ['/inventory'],
+  inventory: ['/inventory', '/inventory/stores'],
 };

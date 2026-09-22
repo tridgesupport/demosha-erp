@@ -393,6 +393,22 @@ export const fetchInventoryFilters = () =>
 export const fetchInventoryByItem = (item: string) =>
   request(`/api/inventory/by-item?item=${encodeURIComponent(item)}`);
 
+// Stores Inventory (separate Tally company "stores", stores.v_inventory_current)
+export const fetchStoresInventory = (params?: { item?: string; stockGroup?: string; stockGroupParent?: string }) => {
+  const p = new URLSearchParams();
+  if (params?.item)             p.set('item', params.item);
+  if (params?.stockGroup)       p.set('stockGroup', params.stockGroup);
+  if (params?.stockGroupParent) p.set('stockGroupParent', params.stockGroupParent);
+  const qs = p.toString();
+  return request(`/api/stores-inventory${qs ? `?${qs}` : ''}`);
+};
+
+export const fetchStoresInventoryFilters = () =>
+  request<{ stock_groups: string[]; stock_group_parents: string[] }>('/api/stores-inventory/filters');
+
+export const fetchStoresInventoryByItem = (item: string) =>
+  request(`/api/stores-inventory/by-item?item=${encodeURIComponent(item)}`);
+
 // Production
 export const fetchProductionProducts = () =>
   request('/api/production/products');

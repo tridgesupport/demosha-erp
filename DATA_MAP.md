@@ -1,6 +1,6 @@
 # Data map: where SQL lives and what it's for
 
-This repo has **four separate SQL domains** that look similar (lots of
+This repo has **five separate SQL domains** that look similar (lots of
 `.sql` files, similar names) but serve different purposes and different
 consumers. This doc exists so that's never ambiguous again — for you, and
 for Claude in a future session that hasn't seen this conversation.
@@ -11,6 +11,7 @@ for Claude in a future session that hasn't seen this conversation.
 |---|---|---|---|
 | **ERP operational schema** | `apps/api/src/db/migrations/` | The app's live tables (purchase, sales, production, vendors...) | Every ERP page, via inline queries in `apps/api/src/routes/*.ts` |
 | **Tally analytics views** | `tally-analytics/{sql,sql-generated,sql-combined}/` | The `tally_analytics` Postgres schema (views, not tables) | ERP **Analytics tab** (`routes/analytics.ts`) **and** Data Studio / Looker Studio dashboards |
+| **Stores (warehouse) Tally export** | `tally-analytics/sql/090_stores_inventory.sql` | The `stores` Postgres schema (raw tables + one view) | ERP **Stores Inventory tab** (`routes/stores_inventory.ts`) |
 | **Statutory report reconciliation** | `reports/sql/` | Nothing live — one-off, run manually via `psql` | You, checking a number against the audited annual report |
 | **Raw material prices** | `raw-material-prices/` + migrations `016`/`017` | `raw_materials` / `raw_material_prices` tables | Scheduled scrapers (GitHub Actions), queried directly when needed |
 | **Data agent (chat Q&A)** | migrations `028`-`030`, `apps/api/src/agent/`, `db/agentClient.ts`, `lib/sqlGuard.ts` | `agent_*` tables, read-only `agent_*` Postgres roles, curated `agent_api` views | Natural-language agent; runs read-only SQL over `tally_analytics` (+ `agent_api` for sales/ops), scoped by role. Its context is `apps/api/src/agent/context.ts` |
@@ -59,7 +60,32 @@ slice for Data Studio or the Analytics tab → this is where it goes. Add or
 extend a view in `sql/`, propagate through `generate.sh`, add the
 `UNION ALL` branch in `sql-combined/`.
 
-## 3. Statutory report reconciliation — `reports/sql/`
+## 3. Stores (warehouse) Tally export — `stores` schema
+
+A **second, separate** raw Tally export, structurally identical to the
+`tallydb-fy*` schemas behind domain 2 (same `mst_stock_item`, `mst_godown`,
+`trn_inventory`, etc.) but from a genuinely different Tally "company":
+**"demosha chemicals pvt ltd (stores)(from 2025)"** — the physical
+stores/warehouse book (packing material, engineering spares, electrical
+items, ...), not the main sales/P&L company. Godowns: DEMOSHA, Demosha
+Chemicals (Unit-2), Western India Chemical. **Do not join this against
+`tally_analytics`/`tallydb-fy*` — unrelated data sets that happen to share
+a table shape.**
+
+Only one view exists here so far: `stores.v_inventory_current`
+(`tally-analytics/sql/090_stores_inventory.sql`), same "current stock"
+pattern as `tally_analytics.v_inventory_current` — Tally's own computed
+`closing_balance`/`closing_value` per item, as of the last sync
+(`stores.config` has the sync timestamp). **`value_on_hand` is unreliable
+here** (every nonzero value observed so far is negative) — use
+`quantity_on_hand`.
+
+**If you need:** a new stores/warehouse-side query → add it here, in
+`stores.v_*` views, following the pattern in `090_stores_inventory.sql`.
+Not the same folder-and-schema as domain 2, even though both are
+Tally-sourced.
+
+## 4. Statutory report reconciliation — `reports/sql/`
 
 Standalone queries built to **tally against `annual report 2425.pdf`** (the
 audited FY2024-25/FY2023-24 financial statements) — P&L, Balance Sheet, Cash
@@ -77,7 +103,7 @@ one-off figure for a statutory note → this is where it goes. Add a new
 `.sql` file here, and add its status to the README table when you validate
 (or fail to validate) it.
 
-## 4. Raw material prices — `raw-material-prices/`
+## 5. Raw material prices — `raw-material-prices/`
 
 Unrelated to Tally entirely. External commodity price tracking (MCX zinc,
 LME zinc, National Coal Index) into its own generic `raw_materials` /
@@ -96,6 +122,7 @@ different places depending on intent:
 | You say... | It goes in... |
 |---|---|
 | "...for a Data Studio chart" / "...for the Analytics tab" | `tally-analytics/sql/` (+ propagate to `sql-generated`/`sql-combined`) |
+| "...for the Stores Inventory tab" / "...warehouse/godown stock" | `tally-analytics/sql/090_stores_inventory.sql`, `stores.v_*` |
 | "...to check against the audited report" / "...for Note X" | `reports/sql/` |
 | "...so the [X] page in the app can show/save it" | a new migration in `apps/api/src/db/migrations/` + route code |
 | no destination stated, "just get me the number" | a scratch query, not saved anywhere — say so if you *do* want it kept |

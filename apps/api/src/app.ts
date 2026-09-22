@@ -19,6 +19,7 @@ import productionReportsRouter from './routes/production_reports';
 import dispatchSchedulesRouter from './routes/dispatch_schedules';
 import analyticsRouter from './routes/analytics';
 import inventoryRouter from './routes/inventory';
+import storesInventoryRouter from './routes/stores_inventory';
 import agentRouter from './routes/agent';
 
 // Single source of truth for the Express app — shared by the local dev
@@ -165,6 +166,7 @@ app.use('/api/production', productionRouter);
 app.use('/api/dispatch-schedules', dispatchSchedulesRouter);
 app.use('/api/analytics', analyticsRouter);
 app.use('/api/inventory', inventoryRouter);
+app.use('/api/stores-inventory', storesInventoryRouter);
 app.use('/api/agent', agentRouter);
 
 app.get('/', (_req, res) => {

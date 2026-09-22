@@ -35,6 +35,7 @@ import ZFS from '@/pages/production/ZFS';
 import ZNO from '@/pages/production/ZNO';
 import DispatchSchedulesList from '@/pages/dispatch/DispatchSchedulesList';
 import InventoryPage from '@/pages/Inventory';
+import StoresInventoryPage from '@/pages/StoresInventory';
 import RefreshDataButton from '@/components/analytics/RefreshDataButton';
 
 // Lazy-loaded: the Analytics tab is restricted to admin/manager and most
@@ -121,7 +122,8 @@ export const TAB_CONFIG: Record<string, { label: string; links: { to: string; la
   inventory: {
     label: 'Inventory',
     links: [
-      { to: '/inventory', label: 'Inventory' },
+      { to: '/inventory', label: 'Inventory', exact: true },
+      { to: '/inventory/stores', label: 'Stores Inventory' },
     ],
   },
   // Not part of the role_tab_permissions system: shown to anyone whose role has data-assistant
@@ -438,6 +440,7 @@ export default function App() {
                 <Route path="/production/:productCode" element={<LogsheetList />} />
                 <Route path="/dispatch/schedules" element={<DispatchSchedulesList />} />
                 <Route path="/inventory" element={<InventoryPage />} />
+                <Route path="/inventory/stores" element={<StoresInventoryPage />} />
                 <Route path="/assistant" element={<Suspense fallback={<AnalyticsPageLoading />}><Assistant /></Suspense>} />
                 <Route path="*" element={<Navigate to="/" replace />} />
               </Routes>
